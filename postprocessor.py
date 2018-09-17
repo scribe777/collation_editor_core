@@ -198,6 +198,7 @@ class PostProcessor(Regulariser, SettingsApplier):
                         except Exception:
                             print('**** Problem with readings_list[j][text] ({2}) array max: {0}; i: {1}'
                                   .format(len(readings_list[j]['text']), i, readings_list[j]['text']), file=sys.stderr)
+#                            new_readings[text] = {'text': []}
                             raise DataInputException('Error likely to have been caused by input data')
                     new_readings[text]['witnesses'] = readings_list[j]['witnesses']
             all_witnesses = copy.copy(witnesses)

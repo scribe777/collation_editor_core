@@ -368,7 +368,7 @@ CL = (function() {
       }
     }
     //deal with text and internal gaps
-    for (i = 0; i < witness_text.length; i += 1) {
+    for (i = 0; witness_text && i < witness_text.length; i += 1) {
       found_word = undefined;
       if (reading_type === 'subreading' && witness_text[i][witness].hasOwnProperty('decision_details')) {
         //loop backwards and only use t of rules that match your list of supplied types
@@ -3203,7 +3203,7 @@ CL = (function() {
             //							console.log(reading.text[0])
             //this should never happen and means the data needs osme serious work but keeping to keep collaborators happy
             if (!reading.text[0].hasOwnProperty(witness)) {
-              console.log('**** Problem witness: ' + witness);
+              console.log('**** Problem witness: ' + witness + ';reading.text[0]');
               return[false];
             }
             if (reading.text[0][witness].index === '2') {
@@ -3253,7 +3253,7 @@ CL = (function() {
           }
           //this should never happen and means the data needs osme serious work but keeping to keep collaborators happy
           if (!reading.text[reading.text.length - 1].hasOwnProperty(witness)) {
-            console.log('**** Problem witness: ' + witness);
+            console.log('**** Problem witness: ' + witness + ';reading.text['+(reading.text.length-1)+']');
             return[false];
           }
           if (reading.text[reading.text.length - 1][witness].hasOwnProperty('gap_after')) {

@@ -5,11 +5,53 @@ Provides the base class for collation engines and a registry mechanism
 so that engines can be added without modifying core code.
 """
 import json
+import os
 import re
 import sys
 import time
 import unicodedata
 from abc import ABC, abstractmethod
+
+
+# Lazy cache of WEB-INF/sysconfig.properties parsed as key=value pairs.
+# Loaded on first access by CollationEngine.get_setting(); subsequent calls
+# reuse the cache. Set VMR_SYSCONFIG_PATH in the process environment to point
+# at the file explicitly; otherwise well-known deployment paths are tried.
+_sysconfig_cache = None
+_SYSCONFIG_CANDIDATES = (
+    '/home/ntvmr/src/community/webapp/WEB-INF/sysconfig.properties',
+    '/data/home/ntvmr/src/community/webapp/WEB-INF/sysconfig.properties',
+)
+
+
+def _load_sysconfig():
+    global _sysconfig_cache
+    if _sysconfig_cache is not None:
+        return _sysconfig_cache
+    config = {}
+    paths = []
+    env_path = os.environ.get('VMR_SYSCONFIG_PATH')
+    if env_path:
+        paths.append(env_path)
+    paths.extend(_SYSCONFIG_CANDIDATES)
+    for path in paths:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '=' not in line:
+                        continue
+                    key, _, value = line.partition('=')
+                    config[key.strip()] = value.strip()
+            break
+        except (IOError, OSError):
+            continue
+    _sysconfig_cache = config
+    return config
 
 # Combining characters to strip when normalize_diacritics is enabled
 DIACRITIC_COMBINING_CHARS = re.compile(
@@ -116,6 +158,26 @@ class CollationEngine(ABC):
         self.algorithm_settings = algorithm_settings
         self.display_settings = display_settings or {}
         self._init_conversation_log()
+
+    def get_setting(self, key, default=None):
+        """Resolve a config value with precedence:
+          1. per-project (algorithm_settings, from PROJECT.CONFIGURATION JSON)
+          2. webapp sysconfig (WEB-INF/sysconfig.properties)
+          3. caller-supplied default
+
+        Used for credentials and other defaults so projects can override the
+        webapp-wide value without storing copies in the database. An empty
+        per-project value (None or "") falls through to sysconfig, so a
+        project can defer to the default by clearing the field rather than
+        having to delete the key.
+        """
+        val = self.algorithm_settings.get(key)
+        if val:
+            return val
+        val = _load_sysconfig().get(key)
+        if val:
+            return val
+        return default
 
     def process_prompt_template(self, prompt_text):
         """Process template conditionals in a system prompt.

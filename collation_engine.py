@@ -159,24 +159,51 @@ class CollationEngine(ABC):
         self.display_settings = display_settings or {}
         self._init_conversation_log()
 
+    # Map the short setting names engines look for to the longer
+    # {ENGINE}_{TASK}_DEFAULT_{SETTING} keys actually used in sysconfig.properties,
+    # plus a generic AI_COLLATE_DEFAULT_SYSTEM_PROMPT as the last-resort prompt.
+    # Probed in list order; first hit wins. Engines keep asking for the short
+    # name (e.g. 'GEMINI_MODEL') — the mapping is the bridge to sysconfig.
+    _SYSCONFIG_ALIASES = {
+        'CLAUDE_MODEL':                ['CLAUDE_COLLATE_DEFAULT_MODEL'],
+        'GEMINI_MODEL':                ['GEMINI_COLLATE_DEFAULT_MODEL'],
+        'OPENAI_MODEL':                ['OPENAI_COLLATE_DEFAULT_MODEL'],
+        'GROK_MODEL':                  ['GROK_COLLATE_DEFAULT_MODEL'],
+        'PERPLEXITY_MODEL':            ['PERPLEXITY_COLLATE_DEFAULT_MODEL'],
+        'OPENROUTER_MODEL':            ['OPENROUTER_COLLATE_DEFAULT_MODEL'],
+        'GITHUB_MODELS_MODEL':         ['GITHUB_MODELS_COLLATE_DEFAULT_MODEL'],
+
+        'CLAUDE_SYSTEM_PROMPT':        ['CLAUDE_COLLATE_DEFAULT_SYSTEM_PROMPT',        'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'GEMINI_SYSTEM_PROMPT':        ['GEMINI_COLLATE_DEFAULT_SYSTEM_PROMPT',        'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'OPENAI_SYSTEM_PROMPT':        ['OPENAI_COLLATE_DEFAULT_SYSTEM_PROMPT',        'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'GROK_SYSTEM_PROMPT':          ['GROK_COLLATE_DEFAULT_SYSTEM_PROMPT',          'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'PERPLEXITY_SYSTEM_PROMPT':    ['PERPLEXITY_COLLATE_DEFAULT_SYSTEM_PROMPT',    'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'OPENROUTER_SYSTEM_PROMPT':    ['OPENROUTER_COLLATE_DEFAULT_SYSTEM_PROMPT',    'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'GITHUB_MODELS_SYSTEM_PROMPT': ['GITHUB_MODELS_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+    }
+
     def get_setting(self, key, default=None):
         """Resolve a config value with precedence:
           1. per-project (algorithm_settings, from PROJECT.CONFIGURATION JSON)
-          2. webapp sysconfig (WEB-INF/sysconfig.properties)
-          3. caller-supplied default
+          2. webapp sysconfig (WEB-INF/sysconfig.properties), direct hit
+          3. webapp sysconfig via _SYSCONFIG_ALIASES (engine-conventional names)
+          4. caller-supplied default
 
-        Used for credentials and other defaults so projects can override the
-        webapp-wide value without storing copies in the database. An empty
-        per-project value (None or "") falls through to sysconfig, so a
-        project can defer to the default by clearing the field rather than
+        An empty per-project value (None or "") falls through to sysconfig, so
+        a project can defer to the default by clearing the field rather than
         having to delete the key.
         """
         val = self.algorithm_settings.get(key)
         if val:
             return val
-        val = _load_sysconfig().get(key)
+        sysconf = _load_sysconfig()
+        val = sysconf.get(key)
         if val:
             return val
+        for alias in self._SYSCONFIG_ALIASES.get(key, ()):
+            val = sysconf.get(alias)
+            if val:
+                return val
         return default
 
     def process_prompt_template(self, prompt_text):

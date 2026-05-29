@@ -507,6 +507,16 @@ def fix_token_order(table, witnesses):
 
     Modifies table in place and returns a list of descriptions of fixes applied.
     """
+    # AI output is untrusted: a misbehaving model may emit non-numeric strings
+    # as indices (Greek letters, empty strings, etc.). Wrap int() so those
+    # entries are skipped here and surface later as phantom-index errors
+    # in validate_token_integrity instead of crashing the whole engine.
+    def _num(idx):
+        try:
+            return int(idx)
+        except (ValueError, TypeError):
+            return None
+
     num_witnesses = len(witnesses)
     fix_descriptions = []
     for wi in range(num_witnesses):
@@ -527,13 +537,18 @@ def fix_token_order(table, witnesses):
                         entries.append((cgi, ti, idx))
             # find first out-of-order entry
             for j in range(1, len(entries)):
-                if int(entries[j][2]) < int(entries[j-1][2]):
+                a, b = _num(entries[j][2]), _num(entries[j-1][2])
+                if a is None or b is None:
+                    continue  # non-numeric idx — validator will flag as phantom
+                if a < b:
                     bad_cgi, bad_ti, bad_idx = entries[j]
+                    bad_num = a
                     # find where this index should go: before the first entry
                     # with a higher index than bad_idx
                     insert_before = None
                     for k in range(len(entries)):
-                        if int(entries[k][2]) > int(bad_idx) and entries[k] != entries[j]:
+                        kn = _num(entries[k][2])
+                        if kn is not None and kn > bad_num and entries[k] != entries[j]:
                             insert_before = entries[k][0]
                             break
                     if insert_before is None:
@@ -562,6 +577,17 @@ def validate_token_integrity(table, witnesses, input_token_indices):
     Returns:
         list of error strings (empty if valid)
     """
+    # see _num docstring in fix_token_order — same rationale
+    def _num(idx):
+        try:
+            return int(idx)
+        except (ValueError, TypeError):
+            return None
+    # sort key that pushes invalid indices to the end without crashing
+    def _sort_key(idx):
+        n = _num(idx)
+        return (1, idx) if n is None else (0, n)
+
     # fix out-of-order tokens mechanically before validating
     fix_descriptions = fix_token_order(table, witnesses)
 
@@ -589,16 +615,19 @@ def validate_token_integrity(table, witnesses, input_token_indices):
             if missing:
                 errors.append(
                     'Missing token indices {} in witness {}'.format(
-                        sorted(missing, key=lambda x: int(x)), wit_id))
+                        sorted(missing, key=_sort_key), wit_id))
             phantom = set(seen_indices) - input_token_indices[wit_id]
             if phantom:
                 errors.append(
                     'Phantom token indices {} in witness {} (these indices do not exist in the input)'.format(
-                        sorted(phantom, key=lambda x: int(x)), wit_id))
-        # check sequential order
+                        sorted(phantom, key=_sort_key), wit_id))
+        # check sequential order — skip non-numeric indices (already flagged as phantom)
         for j in range(1, len(seen_indices)):
-            if int(seen_indices[j]) < int(seen_indices[j-1]):
-                correct_order = sorted(seen_indices, key=lambda x: int(x))
+            a, b = _num(seen_indices[j]), _num(seen_indices[j-1])
+            if a is None or b is None:
+                continue
+            if a < b:
+                correct_order = sorted(seen_indices, key=_sort_key)
                 bad_idx = seen_indices[j]
                 prev_idx = seen_indices[j-1]
                 errors.append(
@@ -714,6 +743,12 @@ def check_ai_verify_block(output, input_token_indices):
     verify = output.get('verify', {})
     if not verify:
         return []
+    # tolerate non-numeric indices in AI output (see fix_token_order._num)
+    def _sort_key(idx):
+        try:
+            return (0, int(idx))
+        except (ValueError, TypeError):
+            return (1, idx)
     errors = []
     for wit_id, verify_indices in verify.items():
         if wit_id in input_token_indices:
@@ -729,11 +764,11 @@ def check_ai_verify_block(output, input_token_indices):
             if missing_v:
                 errors.append(
                     'AI self-check: missing {} in witness {}'.format(
-                        sorted(missing_v, key=lambda x: int(x)), wit_id))
+                        sorted(missing_v, key=_sort_key), wit_id))
             if extra:
                 errors.append(
                     'AI self-check: unexpected {} in witness {}'.format(
-                        sorted(extra, key=lambda x: int(x)), wit_id))
+                        sorted(extra, key=_sort_key), wit_id))
     if errors:
         print('======= AI verify block errors: {}'.format(
             '; '.join(errors)), file=sys.stderr)

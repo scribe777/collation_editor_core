@@ -8,7 +8,18 @@ import json
 import re
 import sys
 import time
+import unicodedata
 from abc import ABC, abstractmethod
+
+# Combining characters to strip when normalize_diacritics is enabled
+DIACRITIC_COMBINING_CHARS = re.compile(
+    '[\u0304\u0305\uFE24\uFE25\uFE26'  # combining macrons
+    '\u0302\u1DCD'                        # combining circumflexes
+    ']'
+)
+# Coptic combining ni above → Coptic small letter ni
+COPTIC_COMBINING_NI = '\u2CEF'
+COPTIC_LETTER_NI = '\u2C9B'
 
 
 class CollationResult:
@@ -274,6 +285,16 @@ class CollationEngine(ABC):
                 existing.extend(unclear_suggestions)
                 output['regularization_suggestions'] = existing
 
+        # add diacritic normalization suggestions if enabled
+        if 'normalize_diacritics' in self.display_settings:
+            basetext_siglum = data['witnesses'][0]['id'] if data['witnesses'] else None
+            if basetext_siglum:
+                diac_suggestions = _add_diacritic_suggestions(data['witnesses'], basetext_siglum)
+                if diac_suggestions:
+                    existing = output.get('regularization_suggestions', [])
+                    existing.extend(diac_suggestions)
+                    output['regularization_suggestions'] = existing
+
         # enrich regularization suggestions with token references, then deduplicate
         if output.get('regularization_suggestions'):
             token_lookup, _ = build_token_lookup(data['witnesses'])
@@ -404,6 +425,54 @@ def _add_unclear_suggestions(witnesses, skip_supplied=False, skip_unclear=False)
                     'source_index': token['index'],
                 })
 
+    return suggestions
+
+
+def _add_diacritic_suggestions(witnesses, basetext_siglum):
+    """Generate regularization suggestions for combining character differences.
+
+    Compares each non-PBT witness token against the PBT token at the same index.
+    If stripping combining diacritics makes them equal, suggests regularizing
+    the witness form to the PBT form.
+
+    Returns:
+        list of suggestion dicts with source, target, class, reason
+    """
+    # build PBT token lookup
+    pbt_tokens = {}
+    for w in witnesses:
+        if w['id'] == basetext_siglum:
+            for token in w['tokens']:
+                t_val = token.get('n') or token.get('t') or token.get('original', '')
+                pbt_tokens[token['index']] = t_val
+            break
+    if not pbt_tokens:
+        return []
+
+    suggestions = []
+    for w in witnesses:
+        if w['id'] == basetext_siglum:
+            continue
+        for token in w['tokens']:
+            # skip tokens already regularized by a rule
+            if token.get('decision_details'):
+                continue
+            t_val = token.get('t') or token.get('original', '')
+            idx = token['index']
+            pbt_val = pbt_tokens.get(idx)
+            if pbt_val is None or t_val == pbt_val:
+                continue
+            # strip diacritics from both and compare (using t, not original,
+            # so bracket/underdot differences don't produce false suggestions)
+            if strip_diacritics(t_val) == strip_diacritics(pbt_val):
+                suggestions.append({
+                    'source': t_val,
+                    'target': pbt_val,
+                    'class': 'regularised',
+                    'reason': 'simple diacritic difference',
+                    'source_witness': w['id'],
+                    'source_index': idx,
+                })
     return suggestions
 
 
@@ -995,7 +1064,14 @@ def reconstruct_table(table, witnesses, token_lookup):
     return rebuilt
 
 
-def compress_ai_request(data, basetext_siglum):
+def strip_diacritics(text):
+    """Strip combining macrons, circumflexes, and replace combining ni with letter ni."""
+    text = DIACRITIC_COMBINING_CHARS.sub('', text)
+    text = text.replace(COPTIC_COMBINING_NI, COPTIC_LETTER_NI)
+    return text
+
+
+def compress_ai_request(data, basetext_siglum, normalize_diacritics=False):
     """Build a compressed AI request from witness data.
 
     Each token is reduced to just index and t (the effective regularized form).
@@ -1019,6 +1095,8 @@ def compress_ai_request(data, basetext_siglum):
         for token in w['tokens']:
             # use the most regularized form available: n > t > original
             t_val = token.get('n') or token.get('t') or token['original']
+            if normalize_diacritics:
+                t_val = strip_diacritics(t_val)
             ct = {
                 'index': token['index'],
                 't': t_val,

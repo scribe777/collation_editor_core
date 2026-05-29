@@ -1627,6 +1627,7 @@ RG = (function() {
       _addFooterFunctions: _addFooterFunctions,
       _highlightAddedWitness: _highlightAddedWitness,
       stageRule: function(wordId, rules) { _rules[wordId] = rules; },
+      unstageRule: function(element) { SimpleContextMenu._target_element = element; _deleteUnappliedRule(); },
 
     };
   } else {
@@ -1641,6 +1642,7 @@ RG = (function() {
       showVerseCollation: showVerseCollation,
       allRuleStacksEmpty: allRuleStacksEmpty,
       stageRule: function(wordId, rules) { _rules[wordId] = rules; },
+      unstageRule: function(element) { SimpleContextMenu._target_element = element; _deleteUnappliedRule(); },
 
     };
   }

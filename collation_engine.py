@@ -53,6 +53,126 @@ def _load_sysconfig():
     _sysconfig_cache = config
     return config
 
+
+# Shared AI model catalogue (the same models.json the Java ModelRegistry reads),
+# located via the AI_MODEL_REGISTRY key — env override first (so deployments that
+# run the collation tools OUTSIDE the Java webapp can point at the file directly),
+# then sysconfig.properties. The catalogue is the single source of truth for which
+# models exist and their display names / prices; per-engine operational fields
+# (token budgets, thinking config) stay in each engine's in-code _fallback_models
+# and are layered in by id. Mirrors org.crosswire.ai.ModelRegistry.forEngine().
+#
+# Cached per resolved path and re-parsed when the file's mtime changes. (The
+# collation CLI is a fresh process per request, so in practice every request
+# re-reads the file anyway; the mtime cache only matters for long-lived hosts.)
+_model_registry_cache = {}
+
+
+def _resolve_model_registry_path():
+    path = os.environ.get('AI_MODEL_REGISTRY')
+    if path:
+        return path
+    return _load_sysconfig().get('AI_MODEL_REGISTRY')
+
+
+def _load_model_registry():
+    """Parse the shared models.json into {engine_key: [raw model dict]}.
+
+    Returns {} when the catalogue is unconfigured or unreadable, so every
+    engine simply keeps its in-code fallback — the system is never model-less
+    because of a missing or malformed file.
+    """
+    path = _resolve_model_registry_path()
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    cached = _model_registry_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            root = json.load(f)
+    except (IOError, OSError, ValueError):
+        # Keep a previously-good parse on a transient bad edit; else give up.
+        return cached[1] if cached else {}
+    # Per-engine arrays only; skip "_comment"/"_note_*" scalar keys.
+    parsed = {k: v for k, v in root.items() if isinstance(v, list)}
+    _model_registry_cache[path] = (mtime, parsed)
+    return parsed
+
+
+def _registry_entry_to_model(entry, fallback_by_id, default_id):
+    """Map one models.json entry to the engine's model-dict schema.
+
+    The catalogue carries id/name/pricing (in/out/cachedRead)/context/capability
+    flags; the engine's per-model operational fields (max_tokens, reasoning_tokens,
+    adaptive_thinking, thinking_level, uses_responses_api, reasoning_effort) come
+    from the matching in-code fallback entry. An id new to the catalogue inherits
+    those operational fields from the engine's default model so it is still
+    callable until someone tunes it explicitly.
+    """
+    mid = entry.get('id')
+    model = dict(fallback_by_id.get(mid, {}))   # operational fields preserved
+    model['id'] = mid
+    model['name'] = entry.get('name') or model.get('name') or mid
+
+    pricing = dict(model.get('pricing', {}))
+    if 'in' in entry:
+        pricing['input'] = entry['in']
+    if 'out' in entry:
+        pricing['output'] = entry['out']
+    if 'cachedRead' in entry:
+        pricing['cached'] = entry['cachedRead']
+    if pricing:
+        model['pricing'] = pricing
+    if 'context' in entry:
+        model['context'] = entry['context']
+
+    if mid not in fallback_by_id and default_id in fallback_by_id:
+        for k in ('max_tokens', 'reasoning_tokens', 'adaptive_thinking',
+                  'thinking_level', 'uses_responses_api', 'reasoning_effort'):
+            if k not in model and k in fallback_by_id[default_id]:
+                model[k] = fallback_by_id[default_id][k]
+
+    # 'default' is an editorial choice (often a cheaper mid-tier model), kept in
+    # code rather than the price sheet: preserve the in-code default by id.
+    model.pop('default', None)
+    if mid == default_id or entry.get('default'):
+        model['default'] = True
+    return model
+
+
+def models_from_registry(engine_key, fallback):
+    """Engine model list sourced from the shared catalogue, else `fallback`.
+
+    When the catalogue has an entry for this engine it controls which models
+    appear, their order, names and prices; operational fields are layered in
+    from `fallback` by id. When it has no such entry (file missing/unreadable,
+    or no array for this engine), `fallback` is returned verbatim. Never raises.
+
+    engine_key matches the engine's name() and the models.json top-level key;
+    name()'s '_' form (e.g. 'github_models') also matches a '-' catalogue key
+    ('github-models').
+    """
+    try:
+        registry = _load_model_registry()
+        entries = registry.get(engine_key)
+        if entries is None and '_' in engine_key:
+            entries = registry.get(engine_key.replace('_', '-'))
+        if not entries:
+            return fallback
+        fallback_by_id = {m['id']: m for m in fallback}
+        default_id = next((m['id'] for m in fallback if m.get('default')),
+                          fallback[0]['id'] if fallback else None)
+        return [_registry_entry_to_model(e, fallback_by_id, default_id)
+                for e in entries if e.get('id')]
+    except Exception:
+        return fallback
+
+
 # Combining characters to strip when normalize_diacritics is enabled
 DIACRITIC_COMBINING_CHARS = re.compile(
     '[\u0304\u0305\uFE24\uFE25\uFE26'  # combining macrons

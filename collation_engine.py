@@ -4,10 +4,12 @@
 Provides the base class for collation engines and a registry mechanism
 so that engines can be added without modifying core code.
 """
+import hashlib
 import json
 import os
 import re
 import sys
+import tempfile
 import time
 import unicodedata
 from abc import ABC, abstractmethod
@@ -425,14 +427,54 @@ class CollationEngine(ABC):
             except Exception:
                 pass
 
+    # AI engines set this True to enable the alignment replay cache: their
+    # alignment does not depend on token['n'], so recollates triggered only
+    # by rule changes replay the cached alignment instead of re-paying the
+    # model. Engines whose alignment consumes 'n' (CollateX) must leave it
+    # False — for them a rule change is a real alignment change.
+    supports_alignment_replay = False
+
     def run(self, data, options, basetext_siglum):
         """Run collation with automatic timing, then post-process the result.
 
-        Calls collate(), fills in processing_duration if the engine didn't set it,
-        and populates engine_usage with the engine name and algorithm.
+        Calls collate() — or replays a cached alignment when this engine
+        supports it and nothing alignment-relevant changed — fills in
+        processing_duration if the engine didn't set it, and populates
+        engine_usage with the engine name and algorithm.
         """
         start_time = time.time()
-        result = self.collate(data, options, basetext_siglum)
+        result = None
+        cache_key = None
+        if self.supports_alignment_replay:
+            cache_key = alignment_cache_key(data, basetext_siglum, self.name(),
+                                            self.algorithm_settings, self.display_settings)
+            # an explicit retry (Quick Retry / engine re-pick) sets force_realign:
+            # the editor WANTS a fresh roll of the aligner — skip the cache read
+            # but still save the new alignment under the same key afterwards
+            force = bool(self.algorithm_settings.get('force_realign'))
+            if force:
+                print('alignment replay: bypassed (force_realign)', file=sys.stderr)
+            cached = None if force else load_cached_alignment(cache_key)
+            if cached is not None:
+                token_lookup, _ = build_token_lookup(data['witnesses'])
+                result = CollationResult()
+                result.witnesses = cached['witnesses']
+                result.table = reconstruct_table(cached['matrix'], cached['witnesses'], token_lookup)
+                result.feedback['engine_usage'] = {
+                    'engine': self.name(),
+                    'algorithm': options.get('algorithm', ''),
+                    'replayed_alignment': True,
+                    'summary': '{} | alignment replayed from cache — no AI call, $0'.format(self.name()),
+                }
+                result.feedback['comments'] = ('Alignment replayed from the previous run; ' +
+                    'regularization rules were re-applied deterministically. No AI call was made.')
+                print('alignment replay: cache hit {}'.format(cache_key[:12]), file=sys.stderr)
+
+        if result is None:
+            result = self.collate(data, options, basetext_siglum)
+            if (cache_key and result.table and result.witnesses and
+                    not (hasattr(result, '_raw_response') and result._raw_response)):
+                save_cached_alignment(cache_key, result.witnesses, result.table)
 
         elapsed = round(time.time() - start_time, 1)
 
@@ -1278,6 +1320,105 @@ def strip_diacritics(text):
     text = DIACRITIC_COMBINING_CHARS.sub('', text)
     text = text.replace(COPTIC_COMBINING_NI, COPTIC_LETTER_NI)
     return text
+
+
+# ---------------------------------------------------------------------------
+# Alignment replay cache (AI engines)
+#
+# Regularisation rules only change token['n']; a rule folds a form onto a
+# form the aligner already placed in the same column, so re-running an AI
+# engine after rule changes can only reproduce the same alignment (at full
+# cost and latency) or shuffle it nondeterministically. Engines that set
+# supports_alignment_replay = True therefore cache their validated alignment
+# as a (witness, token-index) matrix keyed by everything alignment-relevant
+# EXCEPT 'n' — recollate after rule edits replays the cached alignment and
+# only the deterministic tail (regularise -> postprocessor) re-runs.
+# Witness/transcription/display-setting changes alter the key and force a
+# real engine run. Set VMRCRE_ALIGNMENT_CACHE=off to disable, or point it
+# at a directory to relocate the cache.
+# ---------------------------------------------------------------------------
+
+_ALIGNMENT_CACHE_MAX_AGE = 14 * 86400   # prune entries older than 14 days
+
+
+def _alignment_cache_dir():
+    loc = os.environ.get('VMRCRE_ALIGNMENT_CACHE', '')
+    if loc.lower() == 'off':
+        return None
+    return loc or os.path.join(tempfile.gettempdir(), 'vmrcre_alignment_cache')
+
+
+def alignment_cache_key(data, basetext_siglum, engine_name, algorithm_settings, display_settings):
+    """Hash of the alignment-relevant input. token['n'] is deliberately
+    excluded so rule-only changes hit the cache; t/original, witness set,
+    token order, engine identity, and settings are all included."""
+    sig = {
+        'engine': engine_name,
+        'basetext': basetext_siglum,
+        # force_realign is a per-request intent flag, not an alignment input —
+        # keep it out of the key so a forced rerun overwrites the same entry
+        'settings': {k: v for k, v in sorted((algorithm_settings or {}).items())
+                     if k not in ('debug_log_dir', 'force_realign')},
+        'display': sorted([k for k, v in (display_settings or {}).items() if v]),
+        'witnesses': [
+            {'id': w['id'],
+             'toks': [[t['index'], t.get('t') or t.get('original', '')] for t in w['tokens']]}
+            for w in data['witnesses']
+        ],
+    }
+    payload = json.dumps(sig, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def load_cached_alignment(key):
+    """Return {'witnesses': [...], 'matrix': [...]} or None."""
+    cache_dir = _alignment_cache_dir()
+    if not cache_dir:
+        return None
+    path = os.path.join(cache_dir, key + '.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_cached_alignment(key, witnesses, table):
+    """Reduce table to a token-index matrix and store it."""
+    cache_dir = _alignment_cache_dir()
+    if not cache_dir:
+        return
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        matrix = []
+        for cg in table:
+            m_cg = []
+            for wit_tokens in cg:
+                m_cell = []
+                for item in wit_tokens:
+                    if isinstance(item, dict):
+                        m_cell.append(item.get('index'))
+                    else:
+                        m_cell.append(item)
+                m_cg.append(m_cell)
+            matrix.append(m_cg)
+        path = os.path.join(cache_dir, key + '.json')
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump({'witnesses': witnesses, 'matrix': matrix, 'saved': int(time.time())}, f)
+        _prune_alignment_cache(cache_dir)
+    except Exception as e:
+        print('WARNING: could not save alignment cache: {}'.format(e), file=sys.stderr)
+
+
+def _prune_alignment_cache(cache_dir):
+    try:
+        cutoff = time.time() - _ALIGNMENT_CACHE_MAX_AGE
+        for name in os.listdir(cache_dir):
+            path = os.path.join(cache_dir, name)
+            if name.endswith('.json') and os.path.getmtime(path) < cutoff:
+                os.remove(path)
+    except Exception:
+        pass
 
 
 def compress_ai_request(data, basetext_siglum, normalize_diacritics=False):

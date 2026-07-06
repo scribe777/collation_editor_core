@@ -5232,6 +5232,9 @@ SV = (function() {
 
       showSetVariantsData: showSetVariantsData,
       showSetVariants: showSetVariants,
+      // exported for programmatic merges (AI variant-unit suggestions in
+      // services layers); same code path as the drag-to-combine UI
+      combineUnits: _combineUnits,
       calculateUnitLengths: calculateUnitLengths,
       getUnitData: getUnitData,
       getSpacerUnitData: getSpacerUnitData,
@@ -5368,6 +5371,9 @@ SV = (function() {
 
       showSetVariantsData: showSetVariantsData,
       showSetVariants: showSetVariants,
+      // exported for programmatic merges (AI variant-unit suggestions in
+      // services layers); same code path as the drag-to-combine UI
+      combineUnits: _combineUnits,
       calculateUnitLengths: calculateUnitLengths,
       getUnitData: getUnitData,
       getSpacerUnitData: getSpacerUnitData,

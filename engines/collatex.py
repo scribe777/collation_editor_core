@@ -6,6 +6,19 @@ import urllib.request
 
 from collation.core.collation_engine import CollationEngine, CollationResult
 
+# Seconds to wait for the CollateX microservice. Applies to connect AND to each
+# socket read -- and since CollateX sends nothing at all until the collation is
+# finished, in practice this is the whole budget for the run.
+#
+# Deliberately very generous. A verse-sized collation returns in milliseconds,
+# but a large one -- e.g. John.11 against all available witnesses, approaching
+# 1000 -- can legitimately grind for a long time, and timing out a real result
+# after the editor has waited that long is far worse than waiting longer. The
+# point of the bound is only to stop an UNBOUNDED process leak when the service
+# is dead (see the note at the urlopen call), not to police slow collations.
+# Override per project with the collatex_timeout algorithm setting.
+DEFAULT_COLLATEX_TIMEOUT = 3600
+
 
 class CollatexEngine(CollationEngine):
 
@@ -47,10 +60,24 @@ class CollatexEngine(CollationEngine):
         req.add_header('content-type', 'application/json')
         req.add_header('Accept', accept_header)
 
+        # Without an explicit timeout urllib blocks in recv() indefinitely. On
+        # 2026-08-20 a JVM upgrade left the CollateX service accepting connections
+        # but never replying, and because this call could not time out, 28
+        # collate_cli.py processes accumulated over 16 hours -- one per request,
+        # each pinning a socket and ~36 MB -- until the host ran short of memory.
+        # A bounded wait turns a dead service into a prompt, visible error.
         try:
-            response = urllib.request.urlopen(req, json_witnesses.encode('utf-8'))
+            timeout = float(self.algorithm_settings.get('collatex_timeout')
+                            or DEFAULT_COLLATEX_TIMEOUT)
+        except (TypeError, ValueError):
+            timeout = DEFAULT_COLLATEX_TIMEOUT
+
+        try:
+            response = urllib.request.urlopen(
+                req, json_witnesses.encode('utf-8'), timeout=timeout)
         except Exception as e:
-            self._write_conversation_log('+++ ERROR: CollateX service unavailable: {} +++'.format(e))
+            self._write_conversation_log(
+                '+++ ERROR: CollateX service unavailable after {}s: {} +++'.format(timeout, e))
             raise
 
         response_body = response.read()

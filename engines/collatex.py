@@ -45,7 +45,7 @@ class CollatexEngine(CollationEngine):
 
         witnesses = data.get('witnesses', [])
         word_counts = [len(w.get('tokens', [])) for w in witnesses]
-        self._write_conversation_log(
+        self.log(
             'algorithm={} host={}\n{} witnesses, {} to {} words each'.format(
                 algorithm, host, len(witnesses), min(word_counts), max(word_counts)
             )
@@ -80,7 +80,7 @@ class CollatexEngine(CollationEngine):
         try:
             response = urllib.request.urlopen(req, json_witnesses.encode('utf-8'), timeout=timeout)
         except Exception as e:
-            self._write_conversation_log('+++ ERROR: CollateX service unavailable after {}s: {} +++'.format(timeout, e))
+            self.log('+++ ERROR: CollateX service unavailable after {}s: {} +++'.format(timeout, e))
             raise
 
         response_body = response.read()
@@ -93,9 +93,7 @@ class CollatexEngine(CollationEngine):
             response_json = json.loads(response_body)
             result.table = response_json.get('table', [])
             result.witnesses = response_json.get('witnesses', [])
-            self._write_conversation_log(
-                '+++ SUCCESS: {} CGs, {} witnesses +++'.format(len(result.table), len(result.witnesses))
-            )
+            self.log('+++ SUCCESS: {} CGs, {} witnesses +++'.format(len(result.table), len(result.witnesses)))
             result.feedback['comments'] = (
                 'CollateX {} {} fuzzy match: {} column groups, {} witnesses with between {} and {} words each'.format(
                     algorithm_name, fuzzy, len(result.table), len(result.witnesses), min(word_counts), max(word_counts)
@@ -109,7 +107,7 @@ class CollatexEngine(CollationEngine):
             }
         except Exception as e:
             print('======= error parsing CollateX result as json: ' + str(e), file=sys.stderr)
-            self._write_conversation_log('+++ JSON PARSE ERROR: {} +++'.format(e))
+            self.log('+++ JSON PARSE ERROR: {} +++'.format(e))
             result.feedback['comments'] = 'Error parsing CollateX response: {}'.format(e)
             # return raw response as-is for backward compatibility
             result._raw_response = response_body

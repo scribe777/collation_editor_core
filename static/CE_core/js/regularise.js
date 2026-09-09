@@ -1518,8 +1518,10 @@ var RG = (function () {
       $(row).addClass('deleted');
     },
 
-    _deleteUnappliedRule: function () {
-      const element = SimpleContextMenu._target_element;
+    deleteUnappliedRule: function (element) {
+      if (element === undefined) {
+        element = SimpleContextMenu._target_element;
+      }
       delete _rules[element.id];
       $(element.parentNode).removeClass('redips-mark');
       $(element).removeClass('regularisation-staged');
@@ -1623,7 +1625,7 @@ var RG = (function () {
         $('#delete-unapplied-rule').off('click.dur_c');
         $('#delete-unapplied-rule').off('mouseover.dur_mo');
         $('#delete-unapplied-rule').on('click.dur_c', function () {
-          RG._deleteUnappliedRule();
+          RG.deleteUnappliedRule();
         });
         $('#delete-unapplied-rule').on('mouseover.dur_mo', function () {
           CL.hideTooltip();

@@ -4,6 +4,7 @@
 Provides the base class for collation engines and a registry mechanism
 so that engines can be added without modifying core code.
 """
+
 import hashlib
 import json
 import os
@@ -13,7 +14,6 @@ import tempfile
 import time
 import unicodedata
 from abc import ABC, abstractmethod
-
 
 # Lazy cache of WEB-INF/sysconfig.properties parsed as key=value pairs.
 # Loaded on first access by CollationEngine.get_setting(); subsequent calls
@@ -117,7 +117,7 @@ def _registry_entry_to_model(entry, fallback_by_id, default_id):
     callable until someone tunes it explicitly.
     """
     mid = entry.get('id')
-    model = dict(fallback_by_id.get(mid, {}))   # operational fields preserved
+    model = dict(fallback_by_id.get(mid, {}))  # operational fields preserved
     model['id'] = mid
     model['name'] = entry.get('name') or model.get('name') or mid
 
@@ -134,8 +134,14 @@ def _registry_entry_to_model(entry, fallback_by_id, default_id):
         model['context'] = entry['context']
 
     if mid not in fallback_by_id and default_id in fallback_by_id:
-        for k in ('max_tokens', 'reasoning_tokens', 'adaptive_thinking',
-                  'thinking_level', 'uses_responses_api', 'reasoning_effort'):
+        for k in (
+            'max_tokens',
+            'reasoning_tokens',
+            'adaptive_thinking',
+            'thinking_level',
+            'uses_responses_api',
+            'reasoning_effort',
+        ):
             if k not in model and k in fallback_by_id[default_id]:
                 model[k] = fallback_by_id[default_id][k]
 
@@ -167,23 +173,21 @@ def models_from_registry(engine_key, fallback):
         if not entries:
             return fallback
         fallback_by_id = {m['id']: m for m in fallback}
-        default_id = next((m['id'] for m in fallback if m.get('default')),
-                          fallback[0]['id'] if fallback else None)
-        return [_registry_entry_to_model(e, fallback_by_id, default_id)
-                for e in entries if e.get('id')]
+        default_id = next((m['id'] for m in fallback if m.get('default')), fallback[0]['id'] if fallback else None)
+        return [_registry_entry_to_model(e, fallback_by_id, default_id) for e in entries if e.get('id')]
     except Exception:
         return fallback
 
 
 # Combining characters to strip when normalize_diacritics is enabled
 DIACRITIC_COMBINING_CHARS = re.compile(
-    '[\u0304\u0305\uFE24\uFE25\uFE26'  # combining macrons
-    '\u0302\u1DCD'                        # combining circumflexes
+    '[\u0304\u0305\ufe24\ufe25\ufe26'  # combining macrons
+    '\u0302\u1dcd'  # combining circumflexes
     ']'
 )
 # Coptic combining ni above → Coptic small letter ni
-COPTIC_COMBINING_NI = '\u2CEF'
-COPTIC_LETTER_NI = '\u2C9B'
+COPTIC_COMBINING_NI = '\u2cef'
+COPTIC_LETTER_NI = '\u2c9b'
 
 
 class CollationResult:
@@ -209,8 +213,7 @@ class CollationResult:
         if self.regularization_suggestions:
             d['regularization_suggestions'] = self.regularization_suggestions
         # include only non-empty feedback entries
-        feedback = {k: v for k, v in self.feedback.items()
-                    if v is not None and v != ''}
+        feedback = {k: v for k, v in self.feedback.items() if v is not None and v != ''}
         if feedback:
             d['collation_feedback'] = feedback
         return d
@@ -229,19 +232,18 @@ class CollationEngine(ABC):
 
     # Subclasses should define these to register their models and metadata.
     _engine_meta = {
-         'display_name': 'My Collation Engine',
-         'model_override_key': 'my_engine_algorithm',
+        'display_name': 'My Collation Engine',
+        'model_override_key': 'my_engine_algorithm',
     }
     _models = [
-    # e.g.,
-    #    {'id': 'dekker',
-    #     'name': 'Dekker',
-    #     'default': True
-    #     'max_tokens': 0,  # any additional model propeties the engine wants to keep per model for its own use
-    #    },
-    #    {'id': 'needleman-wunsch', 'name': 'Needleman-Wunsch', 'max_tokens': 0},
+        # e.g.,
+        #    {'id': 'dekker',
+        #     'name': 'Dekker',
+        #     'default': True
+        #     'max_tokens': 0,  # any additional model propeties the engine wants to keep per model for its own use
+        #    },
+        #    {'id': 'needleman-wunsch', 'name': 'Needleman-Wunsch', 'max_tokens': 0},
     ]
-
 
     @classmethod
     def get_model_names(cls):
@@ -287,25 +289,29 @@ class CollationEngine(ABC):
     # Probed in list order; first hit wins. Engines keep asking for the short
     # name (e.g. 'GEMINI_MODEL') — the mapping is the bridge to sysconfig.
     _SYSCONFIG_ALIASES = {
-        'CLAUDE_MODEL':                ['CLAUDE_COLLATE_DEFAULT_MODEL'],
-        'GEMINI_MODEL':                ['GEMINI_COLLATE_DEFAULT_MODEL'],
-        'OPENAI_MODEL':                ['OPENAI_COLLATE_DEFAULT_MODEL'],
-        'GROK_MODEL':                  ['GROK_COLLATE_DEFAULT_MODEL'],
-        'PERPLEXITY_MODEL':            ['PERPLEXITY_COLLATE_DEFAULT_MODEL'],
-        'OPENROUTER_MODEL':            ['OPENROUTER_COLLATE_DEFAULT_MODEL'],
-        'GITHUB_MODELS_MODEL':         ['GITHUB_MODELS_COLLATE_DEFAULT_MODEL'],
-
-        'CLAUDE_SYSTEM_PROMPT':        ['CLAUDE_COLLATE_DEFAULT_SYSTEM_PROMPT',        'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
-        'GEMINI_SYSTEM_PROMPT':        ['GEMINI_COLLATE_DEFAULT_SYSTEM_PROMPT',        'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
-        'OPENAI_SYSTEM_PROMPT':        ['OPENAI_COLLATE_DEFAULT_SYSTEM_PROMPT',        'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
-        'GROK_SYSTEM_PROMPT':          ['GROK_COLLATE_DEFAULT_SYSTEM_PROMPT',          'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
-        'PERPLEXITY_SYSTEM_PROMPT':    ['PERPLEXITY_COLLATE_DEFAULT_SYSTEM_PROMPT',    'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
-        'OPENROUTER_SYSTEM_PROMPT':    ['OPENROUTER_COLLATE_DEFAULT_SYSTEM_PROMPT',    'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
-        'GITHUB_MODELS_SYSTEM_PROMPT': ['GITHUB_MODELS_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'CLAUDE_MODEL': ['CLAUDE_COLLATE_DEFAULT_MODEL'],
+        'GEMINI_MODEL': ['GEMINI_COLLATE_DEFAULT_MODEL'],
+        'OPENAI_MODEL': ['OPENAI_COLLATE_DEFAULT_MODEL'],
+        'GROK_MODEL': ['GROK_COLLATE_DEFAULT_MODEL'],
+        'PERPLEXITY_MODEL': ['PERPLEXITY_COLLATE_DEFAULT_MODEL'],
+        'OPENROUTER_MODEL': ['OPENROUTER_COLLATE_DEFAULT_MODEL'],
+        'GITHUB_MODELS_MODEL': ['GITHUB_MODELS_COLLATE_DEFAULT_MODEL'],
+        'CLAUDE_SYSTEM_PROMPT': ['CLAUDE_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'GEMINI_SYSTEM_PROMPT': ['GEMINI_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'OPENAI_SYSTEM_PROMPT': ['OPENAI_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'GROK_SYSTEM_PROMPT': ['GROK_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'PERPLEXITY_SYSTEM_PROMPT': ['PERPLEXITY_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'OPENROUTER_SYSTEM_PROMPT': ['OPENROUTER_COLLATE_DEFAULT_SYSTEM_PROMPT', 'AI_COLLATE_DEFAULT_SYSTEM_PROMPT'],
+        'GITHUB_MODELS_SYSTEM_PROMPT': [
+            'GITHUB_MODELS_COLLATE_DEFAULT_SYSTEM_PROMPT',
+            'AI_COLLATE_DEFAULT_SYSTEM_PROMPT',
+        ],
     }
 
     def get_setting(self, key, default=None):
-        """Resolve a config value with precedence:
+        """Resolve a config value by precedence.
+
+        Precedence:
           1. per-project (algorithm_settings, from PROJECT.CONFIGURATION JSON)
           2. webapp sysconfig (WEB-INF/sysconfig.properties), direct hit
           3. webapp sysconfig via _SYSCONFIG_ALIASES (engine-conventional names)
@@ -336,9 +342,10 @@ class CollationEngine(ABC):
         When the setting is absent, the if-block is included by default.
         """
         import re
+
         def _replace_block(match):
-            block_type = match.group(1)   # 'if' or 'unless'
-            key = match.group(2)           # e.g. 'regularization'
+            block_type = match.group(1)  # 'if' or 'unless'
+            key = match.group(2)  # e.g. 'regularization'
             content = match.group(3)
             setting = self.algorithm_settings.get('include_' + key)
             enabled = setting is not False  # default to True if absent
@@ -346,9 +353,10 @@ class CollationEngine(ABC):
                 return content if enabled else ''
             else:  # unless
                 return content if not enabled else ''
+
         result = re.sub(
-            r'\{\{#(if|unless)_(\w+)\}\}(.*?)\{\{/(if|unless)_\2\}\}',
-            _replace_block, prompt_text, flags=re.DOTALL)
+            r'\{\{#(if|unless)_(\w+)\}\}(.*?)\{\{/(if|unless)_\2\}\}', _replace_block, prompt_text, flags=re.DOTALL
+        )
 
         # replace {{regularization_classes}} with the configured rule class descriptions
         rule_classes = self.algorithm_settings.get('regularization_rule_classes', [])
@@ -368,16 +376,21 @@ class CollationEngine(ABC):
         """Return a description of the expected JSON keys for error messages."""
         include_reg = self.algorithm_settings.get('include_regularization_suggestions') is not False
         if include_reg:
-            return ('5 keys: "witnesses" (array), "table" (array of ColumnGroups), '
-                    '"verify" (object), "regularization_suggestions" (array), '
-                    'and "ai_comments" (string)')
+            return (
+                '5 keys: "witnesses" (array), "table" (array of ColumnGroups), '
+                '"verify" (object), "regularization_suggestions" (array), '
+                'and "ai_comments" (string)'
+            )
         else:
-            return ('4 keys: "witnesses" (array), "table" (array of ColumnGroups), '
-                    '"verify" (object), and "ai_comments" (string)')
+            return (
+                '4 keys: "witnesses" (array), "table" (array of ColumnGroups), '
+                '"verify" (object), and "ai_comments" (string)'
+            )
 
     def _init_conversation_log(self):
         """Clear the conversation log file for this engine at the start of a run."""
         import os
+
         log_dir = self.algorithm_settings.get('debug_log_dir')
         if log_dir:
             try:
@@ -414,6 +427,7 @@ class CollationEngine(ABC):
             entry: a string or a list of strings to append
         """
         import os
+
         log_dir = self.algorithm_settings.get('debug_log_dir')
         if log_dir:
             try:
@@ -446,8 +460,9 @@ class CollationEngine(ABC):
         result = None
         cache_key = None
         if self.supports_alignment_replay:
-            cache_key = alignment_cache_key(data, basetext_siglum, self.name(),
-                                            self.algorithm_settings, self.display_settings)
+            cache_key = alignment_cache_key(
+                data, basetext_siglum, self.name(), self.algorithm_settings, self.display_settings
+            )
             # an explicit retry (Quick Retry / engine re-pick) sets force_realign:
             # the editor WANTS a fresh roll of the aligner — skip the cache read
             # but still save the new alignment under the same key afterwards
@@ -466,14 +481,20 @@ class CollationEngine(ABC):
                     'replayed_alignment': True,
                     'summary': '{} | alignment replayed from cache — no AI call, $0'.format(self.name()),
                 }
-                result.feedback['comments'] = ('Alignment replayed from the previous run; ' +
-                    'regularization rules were re-applied deterministically. No AI call was made.')
+                result.feedback['comments'] = (
+                    'Alignment replayed from the previous run; '
+                    + 'regularization rules were re-applied deterministically. No AI call was made.'
+                )
                 print('alignment replay: cache hit {}'.format(cache_key[:12]), file=sys.stderr)
 
         if result is None:
             result = self.collate(data, options, basetext_siglum)
-            if (cache_key and result.table and result.witnesses and
-                    not (hasattr(result, '_raw_response') and result._raw_response)):
+            if (
+                cache_key
+                and result.table
+                and result.witnesses
+                and not (hasattr(result, '_raw_response') and result._raw_response)
+            ):
                 save_cached_alignment(cache_key, result.witnesses, result.table)
 
         elapsed = round(time.time() - start_time, 1)
@@ -518,10 +539,8 @@ class CollationEngine(ABC):
         check_ai_verify_block(output, input_token_indices)
 
         feedback = output.get('collation_feedback', {})
-        if (not feedback.get('alignment_table')
-                and output.get('table') and output.get('witnesses')):
-            feedback['alignment_table'] = build_html_alignment_table(
-                output['table'], output['witnesses'])
+        if not feedback.get('alignment_table') and output.get('table') and output.get('witnesses'):
+            feedback['alignment_table'] = build_html_alignment_table(output['table'], output['witnesses'])
             output['collation_feedback'] = feedback
 
         # add unclear/supplied regularization suggestions deterministically
@@ -530,7 +549,8 @@ class CollationEngine(ABC):
         skip_unclear = 'view_unclear' not in self.display_settings
         if not (skip_supplied and skip_unclear):
             unclear_suggestions = _add_unclear_suggestions(
-                data['witnesses'], skip_supplied=skip_supplied, skip_unclear=skip_unclear)
+                data['witnesses'], skip_supplied=skip_supplied, skip_unclear=skip_unclear
+            )
             if unclear_suggestions:
                 existing = output.get('regularization_suggestions', [])
                 existing.extend(unclear_suggestions)
@@ -550,17 +570,22 @@ class CollationEngine(ABC):
         if output.get('regularization_suggestions'):
             token_lookup, _ = build_token_lookup(data['witnesses'])
             output['regularization_suggestions'] = _resolve_suggestion_refs(
-                output['regularization_suggestions'], token_lookup)
-            output['regularization_suggestions'] = _dedup_suggestions(
-                output['regularization_suggestions'])
+                output['regularization_suggestions'], token_lookup
+            )
+            output['regularization_suggestions'] = _dedup_suggestions(output['regularization_suggestions'])
 
-        print('process_result: table_cgs={} witnesses={}'.format(
-            len(output.get('table', [])), len(output.get('witnesses', []))), file=sys.stderr)
+        print(
+            'process_result: table_cgs={} witnesses={}'.format(
+                len(output.get('table', [])), len(output.get('witnesses', []))
+            ),
+            file=sys.stderr,
+        )
 
         log_dir = self.algorithm_settings.get('debug_log_dir')
         if log_dir:
             try:
                 import os
+
                 log_path = os.path.join(log_dir, 'post_collation.json')
                 with open(log_path, 'w', encoding='utf-8') as f:
                     f.write(json.dumps({'input': data, 'output': output}, ensure_ascii=False, indent=4))
@@ -574,7 +599,9 @@ class CollationEngine(ABC):
 # Engine registry
 # ---------------------------------------------------------------------------
 
-from collation.core.engines.collatex import CollatexEngine
+# Imported here rather than at the top: engines/collatex.py subclasses CollationEngine,
+# so a top-level import would be circular.
+from collation.core.engines.collatex import CollatexEngine  # noqa: E402
 
 _engine_registry = {}
 _default_engine = CollatexEngine
@@ -640,7 +667,8 @@ def _add_unclear_suggestions(witnesses, skip_supplied=False, skip_unclear=False)
         for token in witness['tokens']:
             # skip tokens that already have an unclear_resolved rule applied
             if token.get('decision_details') and any(
-                    d.get('class') == 'unclear_resolved' for d in token['decision_details']):
+                d.get('class') == 'unclear_resolved' for d in token['decision_details']
+            ):
                 continue
             original = token.get('original', '')
             t = token.get('t', original)
@@ -667,14 +695,16 @@ def _add_unclear_suggestions(witnesses, skip_supplied=False, skip_unclear=False)
                 else:
                     reason = 'unclear text markers confirmed'
 
-                suggestions.append({
-                    'source': original,
-                    'target': t,
-                    'class': 'unclear_resolved',
-                    'reason': reason,
-                    'source_witness': witness['id'],
-                    'source_index': token['index'],
-                })
+                suggestions.append(
+                    {
+                        'source': original,
+                        'target': t,
+                        'class': 'unclear_resolved',
+                        'reason': reason,
+                        'source_witness': witness['id'],
+                        'source_index': token['index'],
+                    }
+                )
 
     return suggestions
 
@@ -716,14 +746,16 @@ def _add_diacritic_suggestions(witnesses, basetext_siglum):
             # strip diacritics from both and compare (using t, not original,
             # so bracket/underdot differences don't produce false suggestions)
             if strip_diacritics(t_val) == strip_diacritics(pbt_val):
-                suggestions.append({
-                    'source': t_val,
-                    'target': pbt_val,
-                    'class': 'regularised',
-                    'reason': 'simple diacritic difference',
-                    'source_witness': w['id'],
-                    'source_index': idx,
-                })
+                suggestions.append(
+                    {
+                        'source': t_val,
+                        'target': pbt_val,
+                        'class': 'regularised',
+                        'reason': 'simple diacritic difference',
+                        'source_witness': w['id'],
+                        'source_index': idx,
+                    }
+                )
     return suggestions
 
 
@@ -754,7 +786,6 @@ def _resolve_suggestion_refs(suggestions, token_lookup):
 
     Suggestions whose source doesn't match any token are dropped.
     """
-    import unicodedata
 
     def _norm(s):
         return unicodedata.normalize('NFC', s) if s else ''
@@ -799,6 +830,7 @@ def _resolve_suggestion_refs(suggestions, token_lookup):
 
     return enriched
 
+
 def build_token_lookup(witnesses):
     """Build lookup dicts from a list of witness objects.
 
@@ -827,6 +859,7 @@ def fix_token_order(table, witnesses):
 
     Modifies table in place and returns a list of descriptions of fixes applied.
     """
+
     # AI output is untrusted: a misbehaving model may emit non-numeric strings
     # as indices (Greek letters, empty strings, etc.). Wrap int() so those
     # entries are skipped here and surface later as phantom-index errors
@@ -857,7 +890,7 @@ def fix_token_order(table, witnesses):
                         entries.append((cgi, ti, idx))
             # find first out-of-order entry
             for j in range(1, len(entries)):
-                a, b = _num(entries[j][2]), _num(entries[j-1][2])
+                a, b = _num(entries[j][2]), _num(entries[j - 1][2])
                 if a is None or b is None:
                     continue  # non-numeric idx — validator will flag as phantom
                 if a < b:
@@ -879,12 +912,19 @@ def fix_token_order(table, witnesses):
                     new_cg = [[] for _ in range(num_witnesses)]
                     new_cg[wi] = [bad_token]
                     table.insert(insert_before, new_cg)
-                    desc = 'We fixed out-of-order index {} in witness {} by moving it to its own new ColumnGroup'.format(
-                        bad_idx, witnesses[wi])
+                    desc = (
+                        'We fixed out-of-order index {} in witness {} by moving it to its own new ColumnGroup'.format(
+                            bad_idx, witnesses[wi]
+                        )
+                    )
                     fix_descriptions.append(desc)
                     changed = True
-                    print('fix_token_order: moved index {} for witness {} to new CG at position {}'.format(
-                        bad_idx, witnesses[wi], insert_before), file=sys.stderr)
+                    print(
+                        'fix_token_order: moved index {} for witness {} to new CG at position {}'.format(
+                            bad_idx, witnesses[wi], insert_before
+                        ),
+                        file=sys.stderr,
+                    )
                     break
     return fix_descriptions
 
@@ -897,12 +937,14 @@ def validate_token_integrity(table, witnesses, input_token_indices):
     Returns:
         list of error strings (empty if valid)
     """
+
     # see _num docstring in fix_token_order — same rationale
     def _num(idx):
         try:
             return int(idx)
         except (ValueError, TypeError):
             return None
+
     # sort key that pushes invalid indices to the end without crashing
     def _sort_key(idx):
         n = _num(idx)
@@ -922,34 +964,35 @@ def validate_token_integrity(table, witnesses, input_token_indices):
                     elif isinstance(token, dict):
                         idx = token.get('index')
                     else:
-                        print('WARNING: unexpected token type {} in witness {}: {}'.format(
-                            type(token), wit_id, token), file=sys.stderr)
+                        print(
+                            'WARNING: unexpected token type {} in witness {}: {}'.format(type(token), wit_id, token),
+                            file=sys.stderr,
+                        )
                         continue
                     if idx in seen_indices:
-                        errors.append(
-                            'Duplicate token index {} in witness {}'.format(idx, wit_id))
+                        errors.append('Duplicate token index {} in witness {}'.format(idx, wit_id))
                     else:
                         seen_indices.append(idx)
         if wit_id in input_token_indices:
             missing = input_token_indices[wit_id] - set(seen_indices)
             if missing:
-                errors.append(
-                    'Missing token indices {} in witness {}'.format(
-                        sorted(missing, key=_sort_key), wit_id))
+                errors.append('Missing token indices {} in witness {}'.format(sorted(missing, key=_sort_key), wit_id))
             phantom = set(seen_indices) - input_token_indices[wit_id]
             if phantom:
                 errors.append(
                     'Phantom token indices {} in witness {} (these indices do not exist in the input)'.format(
-                        sorted(phantom, key=_sort_key), wit_id))
+                        sorted(phantom, key=_sort_key), wit_id
+                    )
+                )
         # check sequential order — skip non-numeric indices (already flagged as phantom)
         for j in range(1, len(seen_indices)):
-            a, b = _num(seen_indices[j]), _num(seen_indices[j-1])
+            a, b = _num(seen_indices[j]), _num(seen_indices[j - 1])
             if a is None or b is None:
                 continue
             if a < b:
                 correct_order = sorted(seen_indices, key=_sort_key)
                 bad_idx = seen_indices[j]
-                prev_idx = seen_indices[j-1]
+                prev_idx = seen_indices[j - 1]
                 errors.append(
                     'Out-of-order token indices in witness {}: index {} appears after {}. '
                     'Witness tokens MUST be in ascending order across all ColumnGroups. '
@@ -962,9 +1005,9 @@ def validate_token_integrity(table, witnesses, input_token_indices):
                     'all other witnesses). '
                     'Repeat this procedure for every out-of-order index until this witness\'s '
                     'indices read left-to-right in ascending order.'.format(
-                        wit_id, bad_idx, prev_idx,
-                        ','.join(correct_order),
-                        bad_idx, prev_idx, bad_idx))
+                        wit_id, bad_idx, prev_idx, ','.join(correct_order), bad_idx, prev_idx, bad_idx
+                    )
+                )
                 break
     return errors
 
@@ -994,17 +1037,14 @@ def find_mergeable_column_groups(table, witnesses):
                 tokens_a = cg_a[wi] if wi < len(cg_a) else []
                 tokens_b = cg_b[wi] if wi < len(cg_b) else []
                 if tokens_a or tokens_b:
-                    combined = ' '.join(
-                        t.get('original', '') for t in (tokens_a + tokens_b))
+                    combined = ' '.join(t.get('original', '') for t in (tokens_a + tokens_b))
                     texts.append(combined)
             if len(texts) == 0:
                 can_merge = False
             else:
                 # don't merge if either CG is mostly empty (insertion-like)
-                non_empty_a = sum(1 for wi in range(len(witnesses))
-                    if wi < len(cg_a) and cg_a[wi])
-                non_empty_b = sum(1 for wi in range(len(witnesses))
-                    if wi < len(cg_b) and cg_b[wi])
+                non_empty_a = sum(1 for wi in range(len(witnesses)) if wi < len(cg_a) and cg_a[wi])
+                non_empty_b = sum(1 for wi in range(len(witnesses)) if wi < len(cg_b) and cg_b[wi])
                 total = len(witnesses)
                 if non_empty_a <= total / 2 or non_empty_b <= total / 2:
                     # one of the CGs is mostly empty — don't merge
@@ -1022,6 +1062,7 @@ def find_mergeable_column_groups(table, witnesses):
                         can_merge = False
                     else:
                         from collections import Counter
+
                         counts = Counter(texts)
                         most_common_text, most_common_count = counts.most_common(1)[0]
                         if most_common_count > len(texts) / 2:
@@ -1046,8 +1087,9 @@ def find_mergeable_column_groups(table, witnesses):
                 suggestions.append(
                     'CGs {} should be merged into one — most witnesses agree (e.g. "{}"). '
                     'Merge them into a single ColumnGroup.'.format(
-                        ','.join(str(n) for n in cg_nums),
-                        sample[0] if sample else ''))
+                        ','.join(str(n) for n in cg_nums), sample[0] if sample else ''
+                    )
+                )
         i += 1
     return suggestions
 
@@ -1063,12 +1105,14 @@ def check_ai_verify_block(output, input_token_indices):
     verify = output.get('verify', {})
     if not verify:
         return []
+
     # tolerate non-numeric indices in AI output (see fix_token_order._num)
     def _sort_key(idx):
         try:
             return (0, int(idx))
         except (ValueError, TypeError):
             return (1, idx)
+
     errors = []
     for wit_id, verify_indices in verify.items():
         if wit_id in input_token_indices:
@@ -1076,22 +1120,17 @@ def check_ai_verify_block(output, input_token_indices):
             got = set(verify_indices)
             if len(verify_indices) != len(got):
                 dupes = [idx for idx in verify_indices if verify_indices.count(idx) > 1]
-                errors.append(
-                    'AI self-check: duplicates {} in witness {}'.format(
-                        list(set(dupes)), wit_id))
+                errors.append('AI self-check: duplicates {} in witness {}'.format(list(set(dupes)), wit_id))
             missing_v = expected - got
             extra = got - expected
             if missing_v:
                 errors.append(
-                    'AI self-check: missing {} in witness {}'.format(
-                        sorted(missing_v, key=_sort_key), wit_id))
+                    'AI self-check: missing {} in witness {}'.format(sorted(missing_v, key=_sort_key), wit_id)
+                )
             if extra:
-                errors.append(
-                    'AI self-check: unexpected {} in witness {}'.format(
-                        sorted(extra, key=_sort_key), wit_id))
+                errors.append('AI self-check: unexpected {} in witness {}'.format(sorted(extra, key=_sort_key), wit_id))
     if errors:
-        print('======= AI verify block errors: {}'.format(
-            '; '.join(errors)), file=sys.stderr)
+        print('======= AI verify block errors: {}'.format('; '.join(errors)), file=sys.stderr)
     del output['verify']
     return errors
 
@@ -1154,7 +1193,7 @@ def parse_ai_json_response(text):
     if text.startswith('```'):
         first_newline = text.find('\n')
         if first_newline != -1:
-            text = text[first_newline + 1:]
+            text = text[first_newline + 1 :]
         if text.endswith('```'):
             text = text[:-3].strip()
     # fix JavaScript-style array indexing e.g. [["18","20"]][0] → ["18","20"]
@@ -1170,7 +1209,7 @@ def parse_ai_json_response(text):
     # (CGs leak out as top-level values instead of being wrapped in an outer array)
     table_match = re.search(r'"table"\s*:', text)
     if table_match:
-        next_key = re.search(r',\s*"(?:verify|ai_comments)"', text[table_match.end():])
+        next_key = re.search(r',\s*"(?:verify|ai_comments)"', text[table_match.end() :])
         if next_key:
             table_start = table_match.end()
             table_end = table_match.end() + next_key.start()
@@ -1201,8 +1240,7 @@ def parse_ai_json_response(text):
                     rebuilt = re.sub(r',\s*([}\]])', r'\1', rebuilt)
                     try:
                         result = json.loads(rebuilt)
-                        print('fixed broken table structure (reconstructed {} CGs)'.format(
-                            len(cgs)), file=sys.stderr)
+                        print('fixed broken table structure (reconstructed {} CGs)'.format(len(cgs)), file=sys.stderr)
                         return result
                     except json.JSONDecodeError:
                         pass
@@ -1263,21 +1301,23 @@ def expand_compact_table(table, witnesses, token_lookup):
                 if wit_id and wit_id in token_lookup and idx in token_lookup[wit_id]:
                     tokens.append(token_lookup[wit_id][idx])
                 else:
-                    print('WARNING: token index {} not found for witness {}'.format(
-                        idx, wit_id), file=sys.stderr)
+                    print('WARNING: token index {} not found for witness {}'.format(idx, wit_id), file=sys.stderr)
             expanded_cg.append(tokens)
         expanded_table.append(expanded_cg)
     return expanded_table
 
 
 def is_compact_format(table):
-    """Check if a table uses compact index format (arrays of strings)
-    vs full WordToken format (arrays of objects)."""
-    return (len(table) > 0 and len(table[0]) > 0
-            and any(len(cg_wit) > 0 for cg_wit in table[0])
-            and isinstance(next(
-                (item for cg_wit in table[0] for item in cg_wit), None
-            ), str))
+    """Check if a table uses compact index format (arrays of strings).
+
+    As opposed to the full WordToken format (arrays of objects).
+    """
+    return (
+        len(table) > 0
+        and len(table[0]) > 0
+        and any(len(cg_wit) > 0 for cg_wit in table[0])
+        and isinstance(next((item for cg_wit in table[0] for item in cg_wit), None), str)
+    )
 
 
 def reconstruct_table(table, witnesses, token_lookup):
@@ -1308,8 +1348,7 @@ def reconstruct_table(table, witnesses, token_lookup):
                 if wit_id and wit_id in token_lookup and idx in token_lookup[wit_id]:
                     tokens.append(token_lookup[wit_id][idx])
                 else:
-                    print('WARNING: token index {} not found for witness {}'.format(
-                        idx, wit_id), file=sys.stderr)
+                    print('WARNING: token index {} not found for witness {}'.format(idx, wit_id), file=sys.stderr)
             rebuilt_cg.append(tokens)
         rebuilt.append(rebuilt_cg)
     return rebuilt
@@ -1338,7 +1377,7 @@ def strip_diacritics(text):
 # at a directory to relocate the cache.
 # ---------------------------------------------------------------------------
 
-_ALIGNMENT_CACHE_MAX_AGE = 14 * 86400   # prune entries older than 14 days
+_ALIGNMENT_CACHE_MAX_AGE = 14 * 86400  # prune entries older than 14 days
 
 
 def _alignment_cache_dir():
@@ -1349,20 +1388,23 @@ def _alignment_cache_dir():
 
 
 def alignment_cache_key(data, basetext_siglum, engine_name, algorithm_settings, display_settings):
-    """Hash of the alignment-relevant input. token['n'] is deliberately
+    """Hash of the alignment-relevant input.
+
+    token['n'] is deliberately
     excluded so rule-only changes hit the cache; t/original, witness set,
-    token order, engine identity, and settings are all included."""
+    token order, engine identity, and settings are all included.
+    """
     sig = {
         'engine': engine_name,
         'basetext': basetext_siglum,
         # force_realign is a per-request intent flag, not an alignment input —
         # keep it out of the key so a forced rerun overwrites the same entry
-        'settings': {k: v for k, v in sorted((algorithm_settings or {}).items())
-                     if k not in ('debug_log_dir', 'force_realign')},
+        'settings': {
+            k: v for k, v in sorted((algorithm_settings or {}).items()) if k not in ('debug_log_dir', 'force_realign')
+        },
         'display': sorted([k for k, v in (display_settings or {}).items() if v]),
         'witnesses': [
-            {'id': w['id'],
-             'toks': [[t['index'], t.get('t') or t.get('original', '')] for t in w['tokens']]}
+            {'id': w['id'], 'toks': [[t['index'], t.get('t') or t.get('original', '')] for t in w['tokens']]}
             for w in data['witnesses']
         ],
     }
@@ -1458,11 +1500,6 @@ def compress_ai_request(data, basetext_siglum, normalize_diacritics=False):
         'input': {'witnesses': compressed_witnesses},
         'basetext_siglum': basetext_siglum,
         'verse': verse,
-        'output': {
-            'ai_comments': '',
-            'ai_alignment_table': '',
-            'witnesses': [basetext_siglum],
-            'table': []
-        }
+        'output': {'ai_comments': '', 'ai_alignment_table': '', 'witnesses': [basetext_siglum], 'table': []},
     }
     return result

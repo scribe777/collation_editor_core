@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """CollateX collation engine — sends data to the CollateX Java microservice."""
+
 import json
 import sys
 import urllib.request
@@ -21,6 +22,7 @@ DEFAULT_COLLATEX_TIMEOUT = 3600
 
 
 class CollatexEngine(CollationEngine):
+    """Collation engine backed by the CollateX Java microservice."""
 
     _engine_meta = {
         'display_name': 'CollateX',
@@ -33,9 +35,11 @@ class CollatexEngine(CollationEngine):
     ]
 
     def name(self):
+        """Return the registry name of this engine."""
         return 'collatex'
 
     def collate(self, data, options, basetext_siglum):
+        """POST the witnesses to CollateX and return its JSON alignment table."""
         host = self.algorithm_settings.get('collatexHost', 'http://localhost:7369/collate')
         algorithm = self.algorithm_settings.get('collatex_algorithm') or options.get('algorithm', 'dekker')
 
@@ -43,7 +47,9 @@ class CollatexEngine(CollationEngine):
         word_counts = [len(w.get('tokens', [])) for w in witnesses]
         self._write_conversation_log(
             'algorithm={} host={}\n{} witnesses, {} to {} words each'.format(
-                algorithm, host, len(witnesses), min(word_counts), max(word_counts)))
+                algorithm, host, len(witnesses), min(word_counts), max(word_counts)
+            )
+        )
 
         if 'algorithm' in options:
             data['algorithm'] = options['algorithm']
@@ -67,17 +73,14 @@ class CollatexEngine(CollationEngine):
         # each pinning a socket and ~36 MB -- until the host ran short of memory.
         # A bounded wait turns a dead service into a prompt, visible error.
         try:
-            timeout = float(self.algorithm_settings.get('collatex_timeout')
-                            or DEFAULT_COLLATEX_TIMEOUT)
+            timeout = float(self.algorithm_settings.get('collatex_timeout') or DEFAULT_COLLATEX_TIMEOUT)
         except (TypeError, ValueError):
             timeout = DEFAULT_COLLATEX_TIMEOUT
 
         try:
-            response = urllib.request.urlopen(
-                req, json_witnesses.encode('utf-8'), timeout=timeout)
+            response = urllib.request.urlopen(req, json_witnesses.encode('utf-8'), timeout=timeout)
         except Exception as e:
-            self._write_conversation_log(
-                '+++ ERROR: CollateX service unavailable after {}s: {} +++'.format(timeout, e))
+            self._write_conversation_log('+++ ERROR: CollateX service unavailable after {}s: {} +++'.format(timeout, e))
             raise
 
         response_body = response.read()
@@ -90,12 +93,14 @@ class CollatexEngine(CollationEngine):
             response_json = json.loads(response_body)
             result.table = response_json.get('table', [])
             result.witnesses = response_json.get('witnesses', [])
-            self._write_conversation_log('+++ SUCCESS: {} CGs, {} witnesses +++'.format(
-                len(result.table), len(result.witnesses)))
+            self._write_conversation_log(
+                '+++ SUCCESS: {} CGs, {} witnesses +++'.format(len(result.table), len(result.witnesses))
+            )
             result.feedback['comments'] = (
                 'CollateX {} {} fuzzy match: {} column groups, {} witnesses with between {} and {} words each'.format(
-                    algorithm_name, fuzzy, len(result.table), len(result.witnesses),
-                    min(word_counts), max(word_counts)))
+                    algorithm_name, fuzzy, len(result.table), len(result.witnesses), min(word_counts), max(word_counts)
+                )
+            )
             result.feedback['engine_usage'] = {
                 'engine': 'collatex',
                 'model': algorithm,

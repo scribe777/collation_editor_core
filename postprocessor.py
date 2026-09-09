@@ -250,8 +250,6 @@ class PostProcessor(Regulariser, SettingsApplier):
         """Work out whether any units need further splitting and if so send them off to restructure_unit."""
         if self.preserve_column_groups:
             return [readings]
-        token_matches = []
-        base_text = None
         # if we have at least two actual readings (not including empty readings)
         if (len(readings.keys()) > 1 and ('_' not in readings.keys())) or (
             len(readings.keys()) > 2 and ('_' in readings.keys())

@@ -3,9 +3,9 @@ import json
 import sys
 import warnings
 
+from collation.core.collation_engine import get_engine
 from collation.core.postprocessor import PostProcessor
 from collation.core.regulariser import Regulariser
-from collation.core.collation_engine import get_engine
 
 from .exceptions import DataInputException
 
@@ -255,7 +255,10 @@ class PreProcessor(Regulariser):
             algorithm = self.algorithm_settings['algorithm']
         if self.algorithm_settings['tokenComparator'] and self.algorithm_settings['tokenComparator']['type']:
             tokenComparator['type'] = 'levenshtein'
-            if 'tokenComparator' in self.algorithm_settings and 'distance' in self.algorithm_settings['tokenComparator']:
+            if (
+                'tokenComparator' in self.algorithm_settings
+                and 'distance' in self.algorithm_settings['tokenComparator']
+            ):
                 tokenComparator['distance'] = self.algorithm_settings['tokenComparator']['distance']
             else:
                 # default to 2
@@ -339,7 +342,6 @@ class PreProcessor(Regulariser):
             output = pp.produce_variant_units()
         except DataInputException as e:
             print('FAILURE: ' + str(e), file=sys.stderr)
-#            pass
             raise DataInputException
         return output
 

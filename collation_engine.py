@@ -27,6 +27,15 @@ class CollationResult:
             'engine_usage': None,
         }
 
+    @staticmethod
+    def parse_collatex_json(payload):
+        """Parse a CollateX-shaped JSON document (bytes, str or dict) into (table, witnesses)."""
+        if isinstance(payload, bytes):
+            payload = payload.decode('utf-8')
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        return payload.get('table', []), payload.get('witnesses', [])
+
     def to_output_dict(self):
         """Return a dict suitable for use as the 'output' block."""
         d = {
@@ -183,13 +192,11 @@ class CollationEngine(ABC):
 # Engine registry
 # ---------------------------------------------------------------------------
 
-# Imported here rather than at the top: engines/collatex.py subclasses CollationEngine,
-# so a top-level import would be circular.
-from collation.core.engines.collatex import (  # noqa: E402
-    CollatexEngine,
-    CollatexPythonEngine,
-    LocalFunctionEngine,
-)
+# Imported here rather than at the top: the engines subclass CollationEngine,
+# so top-level imports would be circular.
+from collation.core.engines.collate_service import CollateServiceEngine  # noqa: E402
+from collation.core.engines.collatex_microservice import CollatexEngine  # noqa: E402
+from collation.core.engines.collatex_python import CollatexPythonEngine  # noqa: E402
 
 _engine_registry = {}
 _default_engine = CollatexEngine
@@ -233,4 +240,4 @@ def get_engine_registry():
 # these names with their own classes.
 register_engine('collatex', CollatexEngine)
 register_engine('collatex-python', CollatexPythonEngine)
-register_engine('local', LocalFunctionEngine)
+register_engine('local', CollateServiceEngine)

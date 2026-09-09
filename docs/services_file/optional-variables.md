@@ -32,7 +32,7 @@ The method will be provided with the data to collate in the JSON format required
 
 The referenced python function should return the JSON output from collateX or equivalent.
 
-Internally this hook is the `local` collation engine (`engines/collatex.py`); when it is configured it is used in
+Internally this hook is the `local` collation engine (`engines/collate_service.py`); when it is configured it is used in
 preference to every other engine. New integrations should consider writing a `CollationEngine` subclass and
 registering it instead, which gives them timing, feedback and the post-processing hooks for free.
 

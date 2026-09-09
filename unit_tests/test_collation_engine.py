@@ -10,7 +10,9 @@ from collation.core.collation_engine import (
     get_engine_registry,
     register_engine,
 )
-from collation.core.engines.collatex import CollatexEngine, CollatexPythonEngine, LocalFunctionEngine
+from collation.core.engines.collate_service import CollateServiceEngine
+from collation.core.engines.collatex_microservice import CollatexEngine
+from collation.core.engines.collatex_python import CollatexPythonEngine
 
 WITNESSES = [
     {'id': 'A', 'tokens': [{'t': 'the', 'index': '2'}, {'t': 'big', 'index': '4'}, {'t': 'cat', 'index': '6'}]},
@@ -51,7 +53,7 @@ class TestRegistry(TestCase):
         """The three engines shipped with the core resolve by name."""
         self.assertIsInstance(get_engine('collatex', {}), CollatexEngine)
         self.assertIsInstance(get_engine('collatex-python', {}), CollatexPythonEngine)
-        self.assertIsInstance(get_engine('local', {}), LocalFunctionEngine)
+        self.assertIsInstance(get_engine('local', {}), CollateServiceEngine)
 
     def test_unknown_name_falls_to_default(self):
         """An algorithm name with no engine of its own goes to the default engine."""
@@ -106,7 +108,7 @@ class TestRun(TestCase):
         self.assertEqual(engine.get_setting('b', 'dflt'), 'x')
 
 
-class TestLocalFunctionEngine(TestCase):
+class TestCollateServiceEngine(TestCase):
     """Tests for the legacy localCollationFunction hook as an engine."""
 
     def setUp(self):
@@ -129,7 +131,7 @@ class TestLocalFunctionEngine(TestCase):
 
     def _engine(self, function):
         config = {'python_file': 'fake_local_collation', 'class_name': 'Local', 'function': function}
-        return LocalFunctionEngine({'local_collation_function': config})
+        return CollateServiceEngine({'local_collation_function': config})
 
     def test_parses_collatex_json(self):
         """CollateX-shaped JSON from the hook becomes a normal result."""

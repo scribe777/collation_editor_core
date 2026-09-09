@@ -1,6 +1,6 @@
 /* global QUnit, sinon, CL, SV */
 
-QUnit.module('SV _combineUnits', function(hooks) {
+QUnit.module('SV combineUnits', function(hooks) {
 
     const allRules = {"none": [undefined, false], "reconstructed": ["V", false], "unclear": ["V", false],
                       "fehler": ["f", true], "fehlerSuff": ["f", false], "orthographic": ["o", true],
@@ -20,7 +20,7 @@ QUnit.module('SV _combineUnits', function(hooks) {
     });
 
 
-    QUnit.test("test _combineUnits 1", (assert) => {
+    QUnit.test("test combineUnits 1", (assert) => {
         /** test adjacent two units combining with no regularisations and no empty readings */
         sinon.stub(CL, 'getRuleClasses').returns(allRules);
         sinon.stub(CL, 'getCollationHeader').returns([['<div>header row</div>'], 2]);
@@ -49,7 +49,7 @@ QUnit.module('SV _combineUnits', function(hooks) {
         ];
 
         CL.data = {"apparatus": apparatus, "marked_readings": {}, "lac_readings": [], "om_readings": []};
-        SV._combineUnits([[0, "apparatus", undefined], [1, "apparatus", undefined]]);
+        SV.combineUnits([[0, "apparatus", undefined], [1, "apparatus", undefined]]);
         
         assert.equal(CL.data.apparatus.length, 1);
         
@@ -57,7 +57,7 @@ QUnit.module('SV _combineUnits', function(hooks) {
     });
 
 
-    // QUnit.test("test _combineUnits 2", (assert) => {
+    // QUnit.test("test combineUnits 2", (assert) => {
     //     /** test two units combining at the same index point where one word in the second is regularised to lac and 
     //      * will be combining with an om */
     //     console.log('THIS TEST HAS NEVER PASSED')
@@ -120,7 +120,7 @@ QUnit.module('SV _combineUnits', function(hooks) {
     //         ]
     //     };
     //     CL.data = {"apparatus": apparatus, "marked_readings": markedReadings, "lac_readings": [], "om_readings": []};
-    //     SV._combineUnits([[0, "apparatus", undefined], [1, "apparatus", undefined]]);
+    //     SV.combineUnits([[0, "apparatus", undefined], [1, "apparatus", undefined]]);
     //     console.log(CL.data)
 
     //     assert.equal(CL.data.apparatus.length, 1);

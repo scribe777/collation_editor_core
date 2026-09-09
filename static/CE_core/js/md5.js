@@ -25,6 +25,8 @@
  * link to the original resource download page – not the actual file.)
  **/
 
+/* exported MD5 */
+/* eslint-disable no-useless-assignment */
 var MD5 = function(string) {
 
   function RotateLeft(lValue, iShiftBits) {

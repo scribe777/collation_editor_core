@@ -1518,8 +1518,10 @@ var RG = (function () {
       $(row).addClass('deleted');
     },
 
-    _deleteUnappliedRule: function () {
-      const element = SimpleContextMenu._target_element;
+    deleteUnappliedRule: function (element) {
+      if (element === undefined) {
+        element = SimpleContextMenu._target_element;
+      }
       delete _rules[element.id];
       $(element.parentNode).removeClass('redips-mark');
       $(element).removeClass('regularisation-staged');
@@ -1527,15 +1529,11 @@ var RG = (function () {
       rd.enableDrag(true, element);
     },
 
-    // exported for programmatic rule staging (AI regularisation suggestions in
-    // services layers); same code path as the drag-to-regularise UI
+    // exported for programmatic rule staging (e.g. accepting a suggested rule from
+    // a services layer); same code path as the drag-to-regularise UI. The reverse
+    // is deleteUnappliedRule(element).
     stageRule: function (wordId, rules) {
       _rules[wordId] = rules;
-    },
-
-    unstageRule: function (element) {
-      SimpleContextMenu._target_element = element;
-      RG._deleteUnappliedRule();
     },
 
     _scheduleSelectedRulesDeletion: function () {
@@ -1634,7 +1632,7 @@ var RG = (function () {
         $('#delete-unapplied-rule').off('click.dur_c');
         $('#delete-unapplied-rule').off('mouseover.dur_mo');
         $('#delete-unapplied-rule').on('click.dur_c', function () {
-          RG._deleteUnappliedRule();
+          RG.deleteUnappliedRule();
         });
         $('#delete-unapplied-rule').on('mouseover.dur_mo', function () {
           CL.hideTooltip();

@@ -1497,7 +1497,7 @@ var SV = (function() {
               // would be reading pos if single reading)
               if (typeof _selectedVariantUnits[0][2] === 'undefined' &&
                       typeof _selectedVariantUnits[1][2] === 'undefined') {
-                SV._combineUnits(_selectedVariantUnits);
+                SV.combineUnits(_selectedVariantUnits);
               } else {
                 // at least one is a reading
                 SV._moveReading(_selectedVariantUnits);
@@ -3002,15 +3002,9 @@ var SV = (function() {
       document.getElementById('scroller').scrollTop = scrollOffset[1];
     },
   
-    // exported for programmatic merges (AI variant-unit suggestions in
-    // services layers); same code path as the drag-to-combine UI
-    combineUnits: function(units) {
-      return SV._combineUnits(units);
-    },
-
     /** combine two units */
     // TODO: come up with a way of testing adjacency with overlapping rows
-    _combineUnits: function(units) {
+    combineUnits: function(units) {
       let unit1, unit2, errorMess;
       const scrollOffset = [document.getElementById('scroller').scrollLeft,
                             document.getElementById('scroller').scrollTop];

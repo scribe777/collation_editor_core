@@ -1,4 +1,3 @@
-import importlib
 import json
 import sys
 import warnings
@@ -371,7 +370,7 @@ class PreProcessor(Regulariser):
                 return [verse['witnesses'][0]['id'], [verse['witnesses'][0]]]
 
     def _do_collate(self, data, options):  # accept, algorithm, tokenComparator, host='localhost'):
-        """Do the collation using a registered engine or the legacy local_python_functions hook."""
+        """Do the collation with the selected engine."""
         print('COLLATING', file=sys.stderr)
         try:
             print('algorithm - {}'.format(options['algorithm']), file=sys.stderr)
@@ -391,25 +390,18 @@ class PreProcessor(Regulariser):
                     )
                 )
 
-        # 1. Try local_python_functions hook (legacy plugin mechanism)
-        if self.local_python_functions and 'local_collation_function' in self.local_python_functions:
-            module_name = self.local_python_functions['local_collation_function']['python_file']
-            class_name = self.local_python_functions['local_collation_function']['class_name']
-            MyClass = getattr(importlib.import_module(module_name), class_name)
-            collation_class = MyClass()
-            return getattr(collation_class, self.local_python_functions['local_collation_function']['function'])(
-                data, options
-            )
-
-        algorithm = options.get('algorithm', 'dekker')
-
-        # 2. Try registered engine
-        # Pass collatexHost through algorithm_settings for the CollateX engine
+        # Every route is an engine. The legacy localCollationFunction hook maps to
+        # the 'local' engine; otherwise algorithm_settings['engine'] names one,
+        # and failing that the algorithm name does (unregistered names fall to
+        # the default engine, the CollateX microservice).
         settings = dict(self.algorithm_settings) if self.algorithm_settings else {}
         settings['collatexHost'] = self.host
-        engine = get_engine(algorithm, settings, display_settings=self.display_settings)
-
-        if engine is not None:
-            return engine.run(data, options, self.basetext_siglum)
-
-        raise DataInputException('No collation engine registered for algorithm: {}'.format(algorithm))
+        if self.local_python_functions and 'local_collation_function' in self.local_python_functions:
+            settings['local_collation_function'] = self.local_python_functions['local_collation_function']
+            engine_name = 'local'
+        else:
+            engine_name = settings.get('engine') or options.get('algorithm', 'dekker')
+        engine = get_engine(engine_name, settings, display_settings=self.display_settings)
+        if engine is None:
+            raise DataInputException('No collation engine registered for: {}'.format(engine_name))
+        return engine.run(data, options, self.basetext_siglum)

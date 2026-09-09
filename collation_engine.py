@@ -94,6 +94,11 @@ class CollationEngine(ABC):
         return cls._models[0]['id'] if cls._models else None
 
     @classmethod
+    def available(cls):
+        """Whether this engine can run here (e.g. its optional dependency is installed)."""
+        return True
+
+    @classmethod
     def get_engine_registry(cls):
         """Return this engine's metadata and models in registry format."""
         meta = dict(cls._engine_meta)
@@ -180,7 +185,11 @@ class CollationEngine(ABC):
 
 # Imported here rather than at the top: engines/collatex.py subclasses CollationEngine,
 # so a top-level import would be circular.
-from collation.core.engines.collatex import CollatexEngine  # noqa: E402
+from collation.core.engines.collatex import (  # noqa: E402
+    CollatexEngine,
+    CollatexPythonEngine,
+    LocalFunctionEngine,
+)
 
 _engine_registry = {}
 _default_engine = CollatexEngine
@@ -212,9 +221,16 @@ def list_engines():
 
 
 def get_engine_registry():
-    """Return model metadata from all registered engines."""
+    """Return model metadata from every registered engine that is available and has metadata."""
     engines = {}
     for name, cls in _engine_registry.items():
-        if hasattr(cls, '_engine_meta') and cls._engine_meta:
+        if getattr(cls, '_engine_meta', None) and cls.available():
             engines[name] = cls.get_engine_registry()
     return {'engines': engines}
+
+
+# The engines shipped with the core. Services may register more, or re-register
+# these names with their own classes.
+register_engine('collatex', CollatexEngine)
+register_engine('collatex-python', CollatexPythonEngine)
+register_engine('local', LocalFunctionEngine)

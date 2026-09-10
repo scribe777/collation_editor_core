@@ -16,8 +16,8 @@ class CollateServiceEngine(CollationEngine):
     ``python_file`` / ``class_name`` / ``function``; the method is called with
     (data, options) and must return CollateX-shaped JSON (bytes, str or dict),
     as documented for the ``localCollationFunction`` services variable. The
-    engine is not listed in menus: the preprocessor registers and selects it
-    whenever that variable is configured, so it needs no registration of its own.
+    engine is not listed in menus: the preprocessor selects it whenever that
+    variable is configured.
     """
 
     _engine_meta = {}

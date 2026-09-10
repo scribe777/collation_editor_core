@@ -130,8 +130,9 @@ class CollationEngine(ABC):
 # Engine registry
 # ---------------------------------------------------------------------------
 
-# Imported here rather than at the top: the engine subclasses CollationEngine,
-# so a top-level import would be circular.
+# Imported here rather than at the top: the engines subclass CollationEngine,
+# so top-level imports would be circular.
+from collation.core.engines.collate_service import CollateServiceEngine  # noqa: E402
 from collation.core.engines.collatex_microservice import CollatexEngine  # noqa: E402
 
 _engine_registry = {}
@@ -173,6 +174,9 @@ def get_engine_registry():
     return {'engines': engines}
 
 
-# The one engine the core ships and supports. Further engines (including those
-# in contrib/engines/) are registered by the services layer.
+# The engines the core ships: the CollateX microservice (the default) and the
+# collation-service engine behind the localCollationFunction services variable.
+# Further engines (including those in contrib/engines/) are registered by the
+# services layer.
 register_engine('collatex', CollatexEngine)
+register_engine('local', CollateServiceEngine)

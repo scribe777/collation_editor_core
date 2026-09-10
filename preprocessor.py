@@ -2,7 +2,7 @@ import json
 import sys
 import warnings
 
-from collation.core.collation_engine import get_engine, list_engines, register_engine
+from collation.core.collation_engine import get_engine
 from collation.core.postprocessor import PostProcessor
 from collation.core.regulariser import Regulariser
 
@@ -400,12 +400,6 @@ class PreProcessor(Regulariser):
         if self.local_python_functions and 'local_collation_function' in self.local_python_functions:
             settings['local_collation_function'] = self.local_python_functions['local_collation_function']
             engine_name = 'local'
-            if 'local' not in list_engines():
-                # the services variable predates engines: honour it without asking
-                # the services layer to register the contrib engine itself
-                from collation.core.contrib.engines.collate_service import CollateServiceEngine
-
-                register_engine('local', CollateServiceEngine)
         else:
             engine_name = settings.get('engine') or options.get('algorithm', 'dekker')
         self.engine = get_engine(engine_name, settings, display_settings=self.display_settings)

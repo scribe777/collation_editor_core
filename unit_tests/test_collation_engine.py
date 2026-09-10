@@ -10,9 +10,9 @@ from collation.core.collation_engine import (
     get_engine_registry,
     register_engine,
 )
-from collation.core.engines.collate_service import CollateServiceEngine
+from collation.core.contrib.engines.collate_service import CollateServiceEngine
+from collation.core.contrib.engines.collatex_python import CollatexPythonEngine
 from collation.core.engines.collatex_microservice import CollatexEngine
-from collation.core.engines.collatex_python import CollatexPythonEngine
 
 WITNESSES = [
     {'id': 'A', 'tokens': [{'t': 'the', 'index': '2'}, {'t': 'big', 'index': '4'}, {'t': 'cat', 'index': '6'}]},
@@ -54,11 +54,12 @@ class _Unavailable(_StaticEngine):
 class TestRegistry(TestCase):
     """Tests for the engine registry."""
 
-    def test_core_engines_are_registered(self):
-        """The three engines shipped with the core resolve by name."""
+    def test_only_the_microservice_engine_is_registered_by_core(self):
+        """The core registers its CollateX engine; contrib engines are registered by a services layer."""
         self.assertIsInstance(get_engine('collatex', {}), CollatexEngine)
+        self.assertNotIn('collatex-python', get_engine_registry()['engines'])
+        register_engine('collatex-python', CollatexPythonEngine)
         self.assertIsInstance(get_engine('collatex-python', {}), CollatexPythonEngine)
-        self.assertIsInstance(get_engine('local', {}), CollateServiceEngine)
 
     def test_unknown_name_falls_to_default(self):
         """An algorithm name with no engine of its own goes to the default engine."""
@@ -71,7 +72,6 @@ class TestRegistry(TestCase):
         engines = get_engine_registry()['engines']
         self.assertIn('static', engines)
         self.assertNotIn('unavailable', engines)
-        self.assertNotIn('local', engines)  # no metadata: never offered in menus
         self.assertEqual(engines['static']['aligner_label'], 'Flavour')
         self.assertEqual([a['id'] for a in engines['static']['aligners']], ['plain', 'fixed'])
 

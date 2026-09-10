@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 class CollatexPythonEngine(CollationEngine):
     """Collation engine backed by the collatex Python package, run in-process.
 
+    Not registered by the core: a services layer that wants it does
+    ``register_engine('collatex-python', CollatexPythonEngine)``.
     Requires the optional ``collatex`` package (and its Levenshtein dependency);
     available() reports whether it is importable so the registry can leave the
     engine out of menus where it cannot run.

@@ -1,18 +1,23 @@
-"""Collation engine for a project-supplied collation service: the legacy localCollationFunction hook."""
+"""Collation engine for a project-supplied collation service (the localCollationFunction services variable)."""
 
 import importlib
+import json
+import logging
 
 from collation.core.collation_engine import CollationEngine, CollationResult
 
+logger = logging.getLogger(__name__)
+
 
 class CollateServiceEngine(CollationEngine):
-    """The legacy localCollationFunction hook as an engine.
+    """A project's own collation function, wrapped as an engine.
 
     algorithm_settings['local_collation_function'] holds the project's
     ``python_file`` / ``class_name`` / ``function``; the method is called with
     (data, options) and must return CollateX-shaped JSON (bytes, str or dict),
-    exactly as documented for the services-file variable. It is not listed in
-    engine menus: the preprocessor selects it whenever the hook is configured.
+    as documented for the ``localCollationFunction`` services variable. The
+    engine is not listed in menus: the preprocessor selects it whenever that
+    variable is configured.
     """
 
     _engine_meta = {}
@@ -26,16 +31,19 @@ class CollateServiceEngine(CollationEngine):
         config = self.algorithm_settings.get('local_collation_function') or {}
         module = importlib.import_module(config['python_file'])
         instance = getattr(module, config['class_name'])()
-        self.log(
-            'local collation function {}.{}.{}'.format(config['python_file'], config['class_name'], config['function'])
-        )
+        logger.info('collation service %s.%s.%s', config['python_file'], config['class_name'], config['function'])
         response = getattr(instance, config['function'])(data, options)
 
-        result = CollationResult()
+        payload = response
         try:
-            result.table, result.witnesses = CollationResult.parse_collatex_json(response)
-            result.feedback['engine_usage'] = {'engine': self.name(), 'summary': config['function']}
-        except Exception as e:
-            self.log('+++ could not parse the local function result as CollateX JSON: {} +++'.format(e))
+            if isinstance(payload, bytes):
+                payload = payload.decode('utf-8')
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            return CollationResult(witnesses=payload.get('witnesses', []), table=payload.get('table', []))
+        except Exception:
+            # not CollateX JSON: hand it back untouched, as the hook always allowed
+            logger.info('collation service result is not CollateX JSON; passing it through')
+            result = CollationResult()
             result._raw_response = response
-        return result
+            return result

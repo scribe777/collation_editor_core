@@ -22,27 +22,32 @@ OPTIONS = {'outputFormat': 'lcs', 'algorithm': 'dekker', 'tokenComparator': {'ty
 
 
 class _StaticEngine(CollationEngine):
-    """Returns a fixed table; used to test run() without any external service."""
+    """Returns a fixed table; used to test the base class without any external service."""
 
-    _engine_meta = {'display_name': 'Static', 'model_override_key': 'static_model'}
-    _models = [{'id': 'fixed', 'name': 'Fixed', 'max_tokens': 0, 'default': True}]
+    _engine_meta = {'display_name': 'Static', 'aligner_label': 'Flavour', 'aligner_key': 'static_flavour'}
+    _aligners = [{'id': 'plain', 'name': 'Plain'}, {'id': 'fixed', 'name': 'Fixed', 'default': True}]
 
     def name(self):
+        """Registry name."""
         return 'static'
 
     def collate(self, data, options, basetext_siglum):
-        result = CollationResult()
-        result.witnesses = [w['id'] for w in data['witnesses']]
-        result.table = [[[t] for t in (w['tokens'][:1] for w in data['witnesses'])]]
-        return result
+        """One column holding each witness's first token."""
+        return CollationResult(
+            witnesses=[w['id'] for w in data['witnesses']], table=[[[w['tokens'][0]] for w in data['witnesses']]]
+        )
 
 
 class _Unavailable(_StaticEngine):
+    """An engine whose optional dependency is missing."""
+
     @classmethod
     def available(cls):
+        """Never runnable."""
         return False
 
     def name(self):
+        """Registry name."""
         return 'unavailable'
 
 
@@ -67,39 +72,40 @@ class TestRegistry(TestCase):
         self.assertIn('static', engines)
         self.assertNotIn('unavailable', engines)
         self.assertNotIn('local', engines)  # no metadata: never offered in menus
-        self.assertEqual(engines['static']['models'][0]['id'], 'fixed')
+        self.assertEqual(engines['static']['aligner_label'], 'Flavour')
+        self.assertEqual([a['id'] for a in engines['static']['aligners']], ['plain', 'fixed'])
+
+    def test_aligner_helpers(self):
+        """Aligner names and the default aligner come from the class list."""
+        self.assertEqual(_StaticEngine.get_aligner_names(), {'plain': 'Plain', 'fixed': 'Fixed'})
+        self.assertEqual(_StaticEngine.get_default_aligner(), 'fixed')
+        self.assertEqual(CollatexEngine.get_default_aligner(), 'dekker')
+        self.assertIsNone(CollateServiceEngine.get_default_aligner())
 
 
 class TestRun(TestCase):
     """Tests for CollationEngine.run() and its hooks."""
 
-    def test_run_serialises_and_fills_usage(self):
-        """run() returns JSON and fills in the usage bookkeeping."""
+    def test_run_returns_collatex_shaped_json(self):
+        """run() serialises witnesses and table, nothing else."""
         out = json.loads(_StaticEngine({}).run({'witnesses': WITNESSES}, OPTIONS, 'A'))
+        self.assertEqual(sorted(out.keys()), ['table', 'witnesses'])
         self.assertEqual(out['witnesses'], ['A', 'B'])
-        self.assertEqual(len(out['table']), 1)
-        usage = out['collation_feedback']['engine_usage']
-        self.assertEqual(usage['engine'], 'static')
-        self.assertEqual(usage['algorithm'], 'dekker')
-        self.assertIn('duration_seconds', usage)
+        self.assertEqual(out['table'][0][1], [{'t': 'the', 'index': '2'}])
 
-    def test_hooks_wrap_collate_and_output(self):
-        """obtain_result() and post_process() are called around collate()."""
-        calls = []
+    def test_obtain_result_wraps_collate(self):
+        """obtain_result() can replace the collate() call."""
 
-        class Hooked(_StaticEngine):
+        class Cached(_StaticEngine):
             def obtain_result(self, data, options, basetext_siglum):
-                calls.append('obtain')
-                return super().obtain_result(data, options, basetext_siglum)
+                return CollationResult(witnesses=['X'], table=[])
 
-            def post_process(self, output, data):
-                calls.append('post')
-                output['extra'] = True
-                return output
+        self.assertEqual(json.loads(Cached({}).run({'witnesses': WITNESSES}, OPTIONS, 'A'))['witnesses'], ['X'])
 
-        out = json.loads(Hooked({}).run({'witnesses': WITNESSES}, OPTIONS, 'A'))
-        self.assertEqual(calls, ['obtain', 'post'])
-        self.assertTrue(out['extra'])
+    def test_add_extra_collation_data_default_is_identity(self):
+        """The base engine adds nothing to the post-processed output."""
+        output = {'apparatus': []}
+        self.assertIs(_StaticEngine({}).add_extra_collation_data(output), output)
 
     def test_get_setting_ignores_empty_values(self):
         """An empty setting value falls through to the default."""
@@ -109,7 +115,7 @@ class TestRun(TestCase):
 
 
 class TestCollateServiceEngine(TestCase):
-    """Tests for the legacy localCollationFunction hook as an engine."""
+    """Tests for a project-supplied collation service wrapped as an engine."""
 
     def setUp(self):
         """Install a fake project module exposing a collation class."""
@@ -134,13 +140,13 @@ class TestCollateServiceEngine(TestCase):
         return CollateServiceEngine({'local_collation_function': config})
 
     def test_parses_collatex_json(self):
-        """CollateX-shaped JSON from the hook becomes a normal result."""
+        """CollateX-shaped JSON from the service becomes a normal result."""
         out = json.loads(self._engine('collate').run({'witnesses': WITNESSES}, OPTIONS, 'A'))
         self.assertEqual(out['witnesses'], ['A', 'B'])
         self.assertEqual(out['table'][0][1][0]['t'], 'the')
 
     def test_unparseable_result_is_passed_through_raw(self):
-        """Anything else is handed back untouched, as before."""
+        """Anything else is handed back untouched, as the services variable always allowed."""
         self.assertEqual(self._engine('broken').run({'witnesses': WITNESSES}, OPTIONS, 'A'), b'not json')
 
 
@@ -186,7 +192,9 @@ class TestCollatexPythonEngine(TestCase):
         try:
             two = [{'id': 'A', 'tokens': [{'t': 'x'}, {'t': 'y'}]}, {'id': 'B', 'tokens': [{'t': 'x'}, {'t': 'z'}]}]
             fuzzy = dict(OPTIONS, tokenComparator={'type': 'levenshtein', 'distance': 2})
-            out = json.loads(CollatexPythonEngine({}).run({'witnesses': two}, fuzzy, 'A'))
+            out = json.loads(
+                CollatexPythonEngine({'collatex_python_aligner': 'astar'}).run({'witnesses': two}, fuzzy, 'A')
+            )
         finally:
             if saved is not None:
                 sys.modules['collatex'] = saved
@@ -195,6 +203,6 @@ class TestCollatexPythonEngine(TestCase):
         self.assertEqual(seen['output'], 'json')
         self.assertFalse(seen['segmentation'])
         self.assertTrue(seen['near_match'])
+        self.assertTrue(seen['astar'])
         self.assertEqual(out['witnesses'], ['A', 'B'])
         self.assertEqual(out['table'][1], [[{'t': 'y'}], [{'t': 'z'}]])
-        self.assertEqual(out['collation_feedback']['engine_usage']['engine'], 'collatex-python')

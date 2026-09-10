@@ -72,6 +72,7 @@ class PreProcessor(Regulariser):
         else:
             self.preserve_column_groups = False
 
+        self.engine = None
         Regulariser.__init__(self, self.rule_conds_config, self.local_python_functions)
 
     def process_witness_list(self, collation_input_data, accept='lcs'):
@@ -342,7 +343,7 @@ class PreProcessor(Regulariser):
         except DataInputException as e:
             print('FAILURE: ' + str(e), file=sys.stderr)
             raise DataInputException
-        return output
+        return self.engine.add_extra_collation_data(output)
 
     def _get_overtext(self, verse):
         if 'witnesses' not in verse.keys():
@@ -390,7 +391,7 @@ class PreProcessor(Regulariser):
                     )
                 )
 
-        # Every route is an engine. The legacy localCollationFunction hook maps to
+        # Every route is an engine. A configured localCollationFunction maps to
         # the 'local' engine; otherwise algorithm_settings['engine'] names one,
         # and failing that the algorithm name does (unregistered names fall to
         # the default engine, the CollateX microservice).
@@ -401,7 +402,7 @@ class PreProcessor(Regulariser):
             engine_name = 'local'
         else:
             engine_name = settings.get('engine') or options.get('algorithm', 'dekker')
-        engine = get_engine(engine_name, settings, display_settings=self.display_settings)
-        if engine is None:
+        self.engine = get_engine(engine_name, settings, display_settings=self.display_settings)
+        if self.engine is None:
             raise DataInputException('No collation engine registered for: {}'.format(engine_name))
-        return engine.run(data, options, self.basetext_siglum)
+        return self.engine.run(data, options, self.basetext_siglum)

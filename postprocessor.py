@@ -75,13 +75,7 @@ class PostProcessor(Regulariser, SettingsApplier):
             dict: The collation format required for the collation editor display.
         """
         variant_readings = self._create_readings_sets()
-        variant_units = self._format_output(self._anchor_readings(variant_readings))
-        # move collation feedback out of alignment table — it's not part of the alignment data
-        if 'collation_feedback' in self.alignment_table:
-            variant_units['collation_feedback'] = self.alignment_table.pop('collation_feedback')
-        if 'regularization_suggestions' in self.alignment_table:
-            variant_units['regularization_suggestions'] = self.alignment_table.pop('regularization_suggestions')
-        return variant_units
+        return self._format_output(self._anchor_readings(variant_readings))
 
     def _create_readings_sets(self):
         """Turn alignment table into our variant readings structure."""

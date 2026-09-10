@@ -2,8 +2,12 @@
 
 import importlib
 import importlib.util
+import json
+import logging
 
 from collation.core.collation_engine import CollationEngine, CollationResult
+
+logger = logging.getLogger(__name__)
 
 
 class CollatexPythonEngine(CollationEngine):
@@ -11,20 +15,26 @@ class CollatexPythonEngine(CollationEngine):
 
     Requires the optional ``collatex`` package (and its Levenshtein dependency);
     available() reports whether it is importable so the registry can leave the
-    engine out of menus where it cannot run. The package's JSON table is
-    witness-major with ``null`` for gaps and carries its own bookkeeping keys on
-    every token; collate() normalises that to the column-major, empty-list-gap
-    shape the postprocessor expects, so both CollateX routes look identical
-    downstream.
+    engine out of menus where it cannot run.
+
+    The package's JSON differs from the Java microservice's: its table is
+    witness-major (one row per witness) with ``null`` for gaps, and every token
+    carries ``_sigil`` and ``_token_array_position``, whatever ``layout`` is
+    asked for (checked on collatex 2.1.3, 2.2 and 2.3). The Java service is
+    column-major with ``[]`` gaps and the tokens as sent, which is what the
+    postprocessor expects, so collate() transposes and strips.
     """
 
     _engine_meta = {
         'display_name': 'CollateX (Python)',
-        'model_override_key': 'collatex_python_algorithm',
+        'aligner_label': 'Aligner',
+        'aligner_key': 'collatex_python_aligner',
     }
 
-    _models = [
-        {'id': 'dekker', 'name': 'Dekker', 'max_tokens': 0, 'default': True},
+    # The package has one alignment algorithm; astar is its experimental variant.
+    _aligners = [
+        {'id': 'dekker', 'name': 'Dekker', 'default': True},
+        {'id': 'astar', 'name': 'Dekker (A*)'},
     ]
 
     _PRIVATE_TOKEN_KEYS = ('_sigil', '_token_array_position')
@@ -42,46 +52,26 @@ class CollatexPythonEngine(CollationEngine):
         """Collate in-process with the collatex package and return the normalised table."""
         collatex = importlib.import_module('collatex')
 
-        witnesses = data.get('witnesses', [])
-        word_counts = [len(w.get('tokens', [])) for w in witnesses] or [0]
+        aligner = self.algorithm_settings.get('collatex_python_aligner') or self.get_default_aligner()
         comparator = options.get('tokenComparator') or {}
         near_match = comparator.get('type') == 'levenshtein'
-        detect_transpositions = bool(self.algorithm_settings.get('detect_transpositions'))
-        self.log(
-            'collatex (python) near_match={} detect_transpositions={}\n{} witnesses, {} to {} words each'.format(
-                near_match, detect_transpositions, len(witnesses), min(word_counts), max(word_counts)
-            )
+        logger.info(
+            'collatex (python) aligner=%s near_match=%s witnesses=%d',
+            aligner,
+            near_match,
+            len(data.get('witnesses', [])),
         )
 
         collation = collatex.Collation()
-        for witness in witnesses:
+        for witness in data.get('witnesses', []):
             collation.add_witness({'id': witness['id'], 'tokens': witness.get('tokens', [])})
         response = collatex.collate(
-            collation,
-            output='json',
-            segmentation=False,
-            near_match=near_match,
-            detect_transpositions=detect_transpositions,
+            collation, output='json', segmentation=False, near_match=near_match, astar=(aligner == 'astar')
         )
-        rows, witness_ids = CollationResult.parse_collatex_json(response)
-
-        result = CollationResult()
-        result.witnesses = witness_ids
-        result.table = self._to_column_major(rows)
-        fuzzy = 'with' if near_match else 'without'
-        self.log('+++ SUCCESS: {} CGs, {} witnesses +++'.format(len(result.table), len(result.witnesses)))
-        result.feedback['comments'] = (
-            'CollateX (Python) {} fuzzy match: {} column groups, {} witnesses with between {} and {} words each'.format(
-                fuzzy, len(result.table), len(result.witnesses), min(word_counts), max(word_counts)
-            )
+        parsed = json.loads(response) if isinstance(response, str) else response
+        return CollationResult(
+            witnesses=parsed.get('witnesses', []), table=self._to_column_major(parsed.get('table', []))
         )
-        result.feedback['engine_usage'] = {
-            'engine': self.name(),
-            'model': 'dekker',
-            'model_name': 'Dekker',
-            'summary': 'CollateX (Python) Dekker',
-        }
-        return result
 
     @classmethod
     def _to_column_major(cls, rows):

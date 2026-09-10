@@ -1,11 +1,12 @@
-# -*- coding: utf-8 -*-
 """CollateX collation engine: the CollateX Java microservice over HTTP (the default engine)."""
 
 import json
-import sys
+import logging
 import urllib.request
 
 from collation.core.collation_engine import CollationEngine, CollationResult
+
+logger = logging.getLogger(__name__)
 
 # Seconds to wait for the CollateX microservice. Applies to connect AND to each
 # socket read -- and since CollateX sends nothing at all until the collation is
@@ -20,18 +21,28 @@ from collation.core.collation_engine import CollationEngine, CollationResult
 # Override per project with the collatex_timeout algorithm setting.
 DEFAULT_COLLATEX_TIMEOUT = 3600
 
+_ACCEPT_HEADERS = {
+    'json': 'application/json',
+    'lcs': 'application/json',
+    'tei': 'application/tei+xml',
+    'graphml': 'application/graphml+xml',
+    'dot': 'text/plain',
+    'svg': 'image/svg+xml',
+}
+
 
 class CollatexEngine(CollationEngine):
     """Collation engine backed by the CollateX Java microservice."""
 
     _engine_meta = {
         'display_name': 'CollateX',
-        'model_override_key': 'collatex_algorithm',
+        'aligner_label': 'Algorithm',
+        'aligner_key': 'collatex_algorithm',
     }
 
-    _models = [
-        {'id': 'dekker', 'name': 'Dekker', 'max_tokens': 0, 'default': True},
-        {'id': 'needleman-wunsch', 'name': 'Needleman-Wunsch', 'max_tokens': 0},
+    _aligners = [
+        {'id': 'dekker', 'name': 'Dekker', 'default': True},
+        {'id': 'needleman-wunsch', 'name': 'Needleman-Wunsch'},
     ]
 
     def name(self):
@@ -39,37 +50,23 @@ class CollatexEngine(CollationEngine):
         return 'collatex'
 
     def collate(self, data, options, basetext_siglum):
-        """POST the witnesses to CollateX and return its JSON alignment table."""
+        """POST the witnesses to CollateX and return its alignment table."""
         host = self.algorithm_settings.get('collatexHost', 'http://localhost:7369/collate')
         algorithm = self.algorithm_settings.get('collatex_algorithm') or options.get('algorithm', 'dekker')
+        logger.info('collatex algorithm=%s host=%s witnesses=%d', algorithm, host, len(data.get('witnesses', [])))
 
-        witnesses = data.get('witnesses', [])
-        word_counts = [len(w.get('tokens', [])) for w in witnesses]
-        self.log(
-            'algorithm={} host={}\n{} witnesses, {} to {} words each'.format(
-                algorithm, host, len(witnesses), min(word_counts), max(word_counts)
-            )
-        )
-
-        if 'algorithm' in options:
-            data['algorithm'] = options['algorithm']
+        data['algorithm'] = algorithm
         if 'tokenComparator' in options:
             data['tokenComparator'] = options['tokenComparator']
 
-        json_witnesses = json.dumps(data)
-        if 'outputFormat' in options:
-            accept_header = self._convert_header(options['outputFormat'])
-        else:
-            accept_header = 'application/json'
-
         req = urllib.request.Request(host)
         req.add_header('content-type', 'application/json')
-        req.add_header('Accept', accept_header)
+        req.add_header('Accept', _ACCEPT_HEADERS.get(options.get('outputFormat'), 'application/json'))
 
         # Without an explicit timeout urllib blocks in recv() indefinitely. On
         # 2026-08-20 a JVM upgrade left the CollateX service accepting connections
         # but never replying, and because this call could not time out, 28
-        # collate_cli.py processes accumulated over 16 hours -- one per request,
+        # collation processes accumulated over 16 hours -- one per request,
         # each pinning a socket and ~36 MB -- until the host ran short of memory.
         # A bounded wait turns a dead service into a prompt, visible error.
         try:
@@ -78,51 +75,18 @@ class CollatexEngine(CollationEngine):
             timeout = DEFAULT_COLLATEX_TIMEOUT
 
         try:
-            response = urllib.request.urlopen(req, json_witnesses.encode('utf-8'), timeout=timeout)
-        except Exception as e:
-            self.log('+++ ERROR: CollateX service unavailable after {}s: {} +++'.format(timeout, e))
+            response = urllib.request.urlopen(req, json.dumps(data).encode('utf-8'), timeout=timeout)
+        except Exception:
+            logger.error('CollateX service at %s unavailable after %ss', host, timeout)
             raise
 
         response_body = response.read()
-
-        algorithm_name = self.get_model_names().get(algorithm, algorithm)
-        fuzzy = 'with' if self.algorithm_settings.get('fuzzy_match') else 'without'
-
-        result = CollationResult()
         try:
             response_json = json.loads(response_body)
-            result.table = response_json.get('table', [])
-            result.witnesses = response_json.get('witnesses', [])
-            self.log('+++ SUCCESS: {} CGs, {} witnesses +++'.format(len(result.table), len(result.witnesses)))
-            result.feedback['comments'] = (
-                'CollateX {} {} fuzzy match: {} column groups, {} witnesses with between {} and {} words each'.format(
-                    algorithm_name, fuzzy, len(result.table), len(result.witnesses), min(word_counts), max(word_counts)
-                )
-            )
-            result.feedback['engine_usage'] = {
-                'engine': 'collatex',
-                'model': algorithm,
-                'model_name': algorithm_name,
-                'summary': 'CollateX {}'.format(algorithm_name),
-            }
-        except Exception as e:
-            print('======= error parsing CollateX result as json: ' + str(e), file=sys.stderr)
-            self.log('+++ JSON PARSE ERROR: {} +++'.format(e))
-            result.feedback['comments'] = 'Error parsing CollateX response: {}'.format(e)
-            # return raw response as-is for backward compatibility
+        except ValueError:
+            # not JSON (another outputFormat was requested): hand it back untouched
+            logger.info('CollateX returned a non-JSON response; passing it through')
+            result = CollationResult()
             result._raw_response = response_body
-        return result
-
-    @staticmethod
-    def _convert_header(accept):
-        if accept == 'json' or accept == 'lcs':
-            return 'application/json'
-        elif accept == 'tei':
-            return 'application/tei+xml'
-        elif accept == 'graphml':
-            return 'application/graphml+xml'
-        elif accept == 'dot':
-            return 'text/plain'
-        elif accept == 'svg':
-            return 'image/svg+xml'
-        return 'application/json'
+            return result
+        return CollationResult(witnesses=response_json.get('witnesses', []), table=response_json.get('table', []))

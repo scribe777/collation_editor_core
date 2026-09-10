@@ -1,106 +1,55 @@
 """Abstract collation engine and plugin registry.
 
 Provides the base class for collation engines and a registry mechanism so
-that engines can be added without modifying core code. Deployment concerns
-(where settings come from, where logs go) and engine-family concerns (e.g.
-what an LLM-backed engine has to validate) belong in subclasses or mixins,
-which the hooks below are there for.
+that engines can be added without modifying core code. A deployment layers
+its own concerns (where settings come from, what to send back to its front
+end) on through subclasses; see the hooks on CollationEngine.
 """
 
 import json
-import sys
-import time
 from abc import ABC, abstractmethod
 
 
 class CollationResult:
-    """Container for collation engine output."""
+    """What an engine returns from collate(): the CollateX-shaped alignment."""
 
-    def __init__(self):
-        self.table = []
-        self.witnesses = []
-        self.regularization_suggestions = []
-        self.feedback = {
-            'comments': '',
-            'alignment_table': '',
-            'processing_duration': None,
-            'engine_usage': None,
-        }
-
-    @staticmethod
-    def parse_collatex_json(payload):
-        """Parse a CollateX-shaped JSON document (bytes, str or dict) into (table, witnesses)."""
-        if isinstance(payload, bytes):
-            payload = payload.decode('utf-8')
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        return payload.get('table', []), payload.get('witnesses', [])
+    def __init__(self, witnesses=None, table=None):
+        self.witnesses = witnesses or []
+        self.table = table or []
 
     def to_output_dict(self):
-        """Return a dict suitable for use as the 'output' block."""
-        d = {
-            'witnesses': self.witnesses,
-            'table': self.table,
-        }
-        if self.regularization_suggestions:
-            d['regularization_suggestions'] = self.regularization_suggestions
-        # include only non-empty feedback entries
-        feedback = {k: v for k, v in self.feedback.items() if v is not None and v != ''}
-        if feedback:
-            d['collation_feedback'] = feedback
-        return d
+        """Return the dict the preprocessor hands to the postprocessor."""
+        return {'witnesses': self.witnesses, 'table': self.table}
 
 
 class CollationEngine(ABC):
     """Abstract base class for collation engines.
 
-    Subclasses implement name() and collate(). run() wraps collate() with
-    timing and usage bookkeeping and then serialises the result. Two hooks
-    exist for subclasses and mixins: obtain_result() (around the collate
-    call, e.g. for caching) and post_process() (on the output dict before
-    it is serialised, e.g. for validation or enrichment).
+    Subclasses implement name() and collate(). An engine may offer a choice
+    of aligners (CollateX: Dekker or Needleman-Wunsch; an AI engine: its
+    models); it lists them in _aligners and says what to call that choice in
+    _engine_meta so a front end can label the menu correctly.
+
+    Hooks for subclasses:
+      obtain_result()             around collate(); e.g. to reuse a cached result
+      add_extra_collation_data()  after post-processing, to add keys of the
+                                  engine's own to what goes back to the front end
     """
 
-    # Subclasses should define these to register their models and metadata.
+    # Subclasses should define these to describe themselves to front ends.
     _engine_meta = {
         'display_name': 'My Collation Engine',
-        'model_override_key': 'my_engine_algorithm',
+        'aligner_label': 'Aligner',  # what the front end calls the choice below
+        'aligner_key': 'my_engine_aligner',  # algorithm_settings key that selects one
     }
-    _models = [
-        # e.g.,
-        #    {'id': 'dekker',
-        #     'name': 'Dekker',
-        #     'default': True
-        #     'max_tokens': 0,  # any additional model propeties the engine wants to keep per model for its own use
-        #    },
-        #    {'id': 'needleman-wunsch', 'name': 'Needleman-Wunsch', 'max_tokens': 0},
+    _aligners = [
+        # {'id': 'dekker', 'name': 'Dekker', 'default': True},
+        # {'id': 'needleman-wunsch', 'name': 'Needleman-Wunsch'},
     ]
 
-    @classmethod
-    def get_model_names(cls):
-        """Return {model_id: display_name} dict."""
-        return {m['id']: m['name'] for m in cls._models}
-
-    @classmethod
-    def get_model_max_tokens(cls):
-        """Return {model_id: max_tokens} dict."""
-        return {m['id']: m['max_tokens'] for m in cls._models}
-
-    @classmethod
-    def get_model_reasoning_tokens(cls):
-        """Return {model_id: reasoning_tokens} dict.
-
-        If a model does not define reasoning_tokens, it defaults to max_tokens.
-        """
-        return {m['id']: m.get('reasoning_tokens', m['max_tokens']) for m in cls._models}
-
-    @classmethod
-    def get_default_model(cls):
-        """Return the default model ID, or the first model if none marked."""
-        for m in cls._models:
-            if m.get('default'):
-                return m['id']
-        return cls._models[0]['id'] if cls._models else None
+    def __init__(self, algorithm_settings, display_settings=None):
+        self.algorithm_settings = algorithm_settings or {}
+        self.display_settings = display_settings or {}
 
     @classmethod
     def available(cls):
@@ -108,15 +57,24 @@ class CollationEngine(ABC):
         return True
 
     @classmethod
-    def get_engine_registry(cls):
-        """Return this engine's metadata and models in registry format."""
-        meta = dict(cls._engine_meta)
-        meta['models'] = cls._models
-        return meta
+    def get_aligner_names(cls):
+        """Return {aligner_id: display_name}."""
+        return {a['id']: a['name'] for a in cls._aligners}
 
-    def __init__(self, algorithm_settings, display_settings=None):
-        self.algorithm_settings = algorithm_settings or {}
-        self.display_settings = display_settings or {}
+    @classmethod
+    def get_default_aligner(cls):
+        """Return the default aligner id, or the first aligner if none is marked, or None."""
+        for aligner in cls._aligners:
+            if aligner.get('default'):
+                return aligner['id']
+        return cls._aligners[0]['id'] if cls._aligners else None
+
+    @classmethod
+    def get_engine_registry(cls):
+        """Return this engine's metadata and aligners in registry format."""
+        meta = dict(cls._engine_meta)
+        meta['aligners'] = cls._aligners
+        return meta
 
     def get_setting(self, key, default=None):
         """Return algorithm_settings[key] unless absent or empty, else default.
@@ -125,12 +83,6 @@ class CollationEngine(ABC):
         """
         val = self.algorithm_settings.get(key)
         return val if val not in (None, '') else default
-
-    def log(self, entry):
-        """Report engine progress; a string or a list of strings. Defaults to stderr."""
-        if isinstance(entry, list):
-            entry = '\n'.join(entry)
-        print(entry, file=sys.stderr)
 
     @abstractmethod
     def name(self):
@@ -141,7 +93,7 @@ class CollationEngine(ABC):
         """Perform collation and return a CollationResult.
 
         Args:
-            data: dict with 'witnesses' list and 'algorithm' key
+            data: dict with a 'witnesses' list in the CollateX input format
             options: dict with 'outputFormat', 'algorithm', 'tokenComparator'
             basetext_siglum: the siglum of the base text witness
 
@@ -153,39 +105,25 @@ class CollationEngine(ABC):
         """Hook around collate(); override to reuse a previous result, retry, etc."""
         return self.collate(data, options, basetext_siglum)
 
-    def post_process(self, output, data):
-        """Hook on the output dict before serialisation; override to validate or enrich it."""
-        return output
-
     def run(self, data, options, basetext_siglum):
-        """Collate with timing and usage bookkeeping, then serialise the result."""
-        start_time = time.time()
-        result = self.obtain_result(data, options, basetext_siglum)
-        elapsed = round(time.time() - start_time, 1)
+        """Collate and return the CollateX-shaped JSON the postprocessor consumes.
 
-        if result.feedback.get('processing_duration') is None:
-            result.feedback['processing_duration'] = elapsed
-        if result.feedback.get('engine_usage') is None:
-            result.feedback['engine_usage'] = {}
-        usage = result.feedback['engine_usage']
-        usage.setdefault('engine', self.name())
-        usage.setdefault('algorithm', options.get('algorithm', ''))
-        usage.setdefault('duration_seconds', elapsed)
-        usage.setdefault('summary', '{} | {}s'.format(self.name(), elapsed))
-
-        return self.process_result(result, data)
-
-    def process_result(self, result, data):
-        """Serialise a CollationResult, giving post_process() a chance at the dict first.
-
-        Returns:
-            JSON string of the output dict, or the engine's raw response
-            when it supplied one (e.g. CollateX returning bytes directly).
+        Returns the engine's raw response untouched when it supplied one
+        (see CollateServiceEngine), else a JSON string.
         """
+        result = self.obtain_result(data, options, basetext_siglum)
         if getattr(result, '_raw_response', None):
             return result._raw_response
-        output = self.post_process(result.to_output_dict(), data)
-        return json.dumps(output, ensure_ascii=False, indent=4)
+        return json.dumps(result.to_output_dict(), ensure_ascii=False)
+
+    def add_extra_collation_data(self, output):
+        """Hook on the post-processed output before it goes back to the front end.
+
+        Return it unchanged (the default) or add keys of the engine's own. The
+        core display ignores keys it does not know, so whoever adds a key is
+        responsible for displaying it.
+        """
+        return output
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +141,11 @@ _default_engine = CollatexEngine
 
 
 def register_engine(name, engine_class, default=False):
-    """Register a collation engine class by algorithm name.
+    """Register a collation engine class by name.
 
-    If default=True, this engine handles any algorithm name not
-    explicitly registered (e.g. CollateX handles dekker, needleman-wunsch, etc.).
+    If default=True, this engine handles any name not explicitly registered
+    (the CollateX microservice does, so 'dekker' and 'needleman-wunsch' as
+    algorithm names reach it).
     """
     _engine_registry[name] = engine_class
     if default:
@@ -228,7 +167,7 @@ def list_engines():
 
 
 def get_engine_registry():
-    """Return model metadata from every registered engine that is available and has metadata."""
+    """Return metadata from every registered engine that is available and describes itself."""
     engines = {}
     for name, cls in _engine_registry.items():
         if getattr(cls, '_engine_meta', None) and cls.available():
